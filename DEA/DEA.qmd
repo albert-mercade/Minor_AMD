@@ -1,0 +1,1934 @@
+---
+title: "DEA"
+output: html_document
+---
+
+```{r}
+library(readr)
+library(Rsubread)
+library(tidyr)
+library(dplyr)
+library(DESeq2)
+library(ggplot2)
+library(apeglm)
+library(gridExtra)
+library(pheatmap)
+library(writexl)
+library(readxl)
+library(ggrepel)
+library(VennDiagram)
+library(circlize)
+library(scales)
+
+```
+
+## 1. Datasets
+
+### 1.1. Loading datasets for checking
+
+```{r}
+#Getting the count matrix by protein ID instead of locus_tag
+# anot_file <- "Datasets/Ref_genome/sequence.gff"
+# bam_file <- "Datasets/Sorted_bamfiles/sorted_trimmed_MBDSK1-cap_S39_R1_001.bam"
+# cmatrix_R <- featureCounts(files = c(bam_file), isPairedEnd = FALSE, annot.ext = anot_file, isGTFAnnotationFile = TRUE, GTF.featureType = "gene", GTF.attrType = "UniProtKB")
+
+```
+
+```{r}
+# ### LOADING FILES FOR CHECKING
+# #Count matrix from terminal
+# cmatrix_ter <- read_tsv("Short_counts/counts_sorted_trimmed_MBDSK1-cap_S39_R1_001_reduced.txt", skip=1)
+# 
+# #Countmatrix from R featureCounts function
+# anot_file <- "Datasets/Ref_genome/sequence.gff"
+# bam_file <- "Datasets/Sorted_bamfiles/sorted_trimmed_MBDSK1-cap_S39_R1_001.bam"
+# cmatrix_R <- featureCounts(files = c(bam_file), isPairedEnd = FALSE, annot.ext = anot_file, isGTFAnnotationFile = TRUE, GTF.featureType = "gene", GTF.attrType = "locus_tag")
+```
+
+```{r}
+# #function that returns True if the count matrix made by the terminal and R is the same. 
+# count_matrix_is_right <- function(cmatrix_ter, cmatrix_R){
+#   if (all(cmatrix_ter$Geneid == rownames(cmatrix_R$counts)) && all(cmatrix_ter$`/home/albertdalmau/thesis_minor/datasets/bowtie_outputs/sorted_bamfiles/sorted_trimmed_MBDSK1-cap_S39_R1_001.bam` == cmatrix_R$counts[,1]))
+#   {return(TRUE)
+#   }else{
+#       return(FALSE)
+#     }
+# }
+# print(count_matrix_is_right(cmatrix_ter, cmatrix_R))
+```
+
+### 1.2. Loading actual datasets
+
+#### RNA-seq datasets
+
+```{r}
+# Load the .txt files 
+DSK_1 <- read_tsv("Short_counts/counts_sorted_trimmed_MBDSK1_S33_R1_001_reduced.txt",skip=1)
+DSK_2 <- read_tsv("Short_counts/counts_sorted_trimmed_MBDSK2_S34_R1_001_reduced.txt",skip=1)
+DSK_3 <- read_tsv("Short_counts/counts_sorted_trimmed_MBDSK3_S35_R1_001_reduced.txt",skip=1)
+WT_1 <- read_tsv("Short_counts/counts_sorted_trimmed_MBWT1_S30_R1_001_reduced.txt",skip=1)
+WT_2 <- read_tsv("Short_counts/counts_sorted_trimmed_MBWT2_S31_R1_001_reduced.txt",skip=1)
+WT_3 <- read_tsv("Short_counts/counts_sorted_trimmed_MBWT3_S32_R1_001_reduced.txt",skip=1)
+```
+
+#### RNA-seqCAP datasets
+
+```{r}
+#Load the .txt files
+DSK_1_cap <- read_tsv("Short_counts/counts_sorted_trimmed_MBDSK1-cap_S39_R1_001_reduced.txt", skip=1)
+DSK_2_cap <- read_tsv("Short_counts/counts_sorted_trimmed_MBDSK2-cap_S40_R1_001_reduced.txt", skip=1)
+DSK_3_cap <- read_tsv("Short_counts/counts_sorted_trimmed_MBDSK3-cap_S41_R1_001_reduced.txt", skip=1)
+WT_1_cap <- read_tsv("Short_counts/counts_sorted_trimmed_MBWT1-cap_S36_R1_001_reduced.txt", skip=1)
+WT_2_cap <- read_tsv("Short_counts/counts_sorted_trimmed_MBWT2-cap_S37_R1_001_reduced.txt", skip=1)
+WT_3_cap <- read_tsv("Short_counts/counts_sorted_trimmed_MBWT3-cap_S38_R1_001_reduced.txt", skip=1)
+```
+
+#### Final matrices
+
+```{r}
+#Join the datasets:
+count_matrix <- DSK_1 %>% inner_join(DSK_2, by = "Geneid" ) %>% inner_join(DSK_3, by = "Geneid" ) %>% inner_join(WT_1, by = "Geneid" ) %>% inner_join(WT_2, by = "Geneid" ) %>% inner_join(WT_3, by = "Geneid" ) 
+
+count_matrix_cap <- DSK_1_cap %>% inner_join(DSK_2_cap, by = "Geneid" ) %>% inner_join(DSK_3_cap, by = "Geneid" ) %>% inner_join(WT_1_cap, by = "Geneid" ) %>% inner_join(WT_2_cap, by = "Geneid" ) %>% inner_join(WT_3_cap, by = "Geneid") 
+
+#Change col names
+colnames(count_matrix) <- c("Geneids", "DSK_1", "DSK_2", "DSK_3", "WT_1", "WT_2", "WT_3")
+colnames(count_matrix_cap) <- c("Geneids", "DSK_1_cap", "DSK_2_cap", "DSK_3_cap", "WT_1_cap", "WT_2_cap", "WT_3_cap")
+
+#Convert datasets into data.frames and store both matrices externally
+count_matrix <- as.data.frame(count_matrix)
+count_matrix_cap <- as.data.frame(count_matrix_cap)
+write_xlsx(count_matrix, "Datasets/Results/Count_matrices/RNAseq_count_matrix.xlsx")
+write_xlsx(count_matrix_cap, "Datasets/Results/Count_matrices/RNAseq_count_matrix_cap.xlsx")
+
+#Move gene_ids to the row names and get rid of the geneID column
+row.names(count_matrix) <- gsub("BQ2027_","", count_matrix$Geneids) #Get rid of BQ2027_ in geneids
+count_matrix <- count_matrix[,-1]
+row.names(count_matrix_cap) <- gsub("BQ2027_","", count_matrix_cap$Geneids)
+count_matrix_cap <- count_matrix_cap[,-1]
+```
+
+#### Matching genes dataset with functions:
+
+```{r}
+matching_genes_RNAseq_func <- read_excel("Datasets/Results/SHR_matching_genes_RNAseq_functions.xlsx")
+
+```
+
+## 2. DESeq2
+
+As input, the DESeq2 package expects count data as obtained, e.g., from RNA-seq or another high-throughput sequencing experiment, in the form of a matrix of integer values. The value in the *i*-th row -\> genes and the *j*-th column -\> samples.
+
+### 2.1. Normalization of the raw counts:
+
+Since samples have a different sequencing depth (see 3.1.), DESeq2 accounts for these differences using **size factor normalization**. To do so, the **Median-of-ratios** method is used:
+
+1.  Calculation of the geometric mean of the raw counts for each gene.
+
+2.  Then the raw count us divided by the geometric mean, which gives a ratio for each gene in the sample.
+
+3.  For each sample, DESeq2 calculates the median of these ratios across all genes with non-0 counts. This median value will be the **size factor** for that sample.
+
+4.  The raw counts of each gene in each sample are divided by the sample's size factor to obtain **normalized counts**.
+
+This function: `estimateSizeFactors(dds)` generates the size factors and `sizeFactors(dds)` is used to find the scaling factors from DESeq2. In the link above we have a function to calculate the normalization manually, which can be compared to the results obtained with DESeq2.
+
+DESeq2 automatically performs this normalization with the function `DESeq()` (see the Running step). However, if you want to retrieve those counts, you need to use `counts()` with `normalized = TRUE`:
+
+```{r}
+#normalized_counts <- counts(dds, normalized = TRUE)
+```
+
+### 2.2. Dispersion estimation
+
+Lets see how out data looks like:
+
+```{r}
+#Check the distribution of the row data
+par(mfrow = c(1,2))
+hist(as.numeric(as.matrix(count_matrix)), 100, main = "Histogram of raw data", xlab = "Counts")
+hist(log2(as.numeric(as.matrix(count_matrix))+0.5), 100, main = "Histogram of log2 data", xlab = "Counts (log2)")
+```
+
+In the histogram on the left , almost all values are located between 0-1000 (I guess), and really high values make the distribution look **skewed to the right**. In the function of the code below, it can be seen how there are genes with really high values. However, after performing log2 transformation (right histogram), it can be observed an isolated bar containing 0 values at the left, and that the majority of the values are located around 1000 counts (think that now the x-axis is logarithmic). The x-axis contains the number by which 2 is elevated to obtain the raw number.
+
+```{r}
+#Function to get the gene that is maximally expressed in our dataset.
+check_dataset <- count_matrix #Change this variable to check the other dataset
+
+max_gene <- function(dataset){
+  max_g <- max(dataset)
+  which_max <- which(as.matrix(dataset) == max_g, arr.ind = TRUE) #which() the index of the value which satisfies the given condition. If we set it as.matrix, which_max will contain the coordinates of the max gene
+  gene_with_max <- c(rownames(count_matrix)[which_max[1]], colnames(count_matrix)[which_max[2]], max_g)
+  return(gene_with_max)
+  
+}
+sprintf("The gene with the max expression (%s) is %s in the sample %s", max_gene(check_dataset)[3], max_gene(check_dataset)[1], max_gene(check_dataset)[2]) 
+```
+
+Since we will perform Wald test (unlike t-test, this one does not assume equal variance between groups), and hence we do not need to perform variance stabilization (get homoskedasticity). In the Wald test with discrete data, we have 3 possible options for the modelling (Poisson distribution, Binomial and Negative Binomial). Since RNA-seq exhibits overdispersion (see 3.3.), the statistical distribution used by DESeq2 to model this dispersion is a **negative binomial distribution**.
+
+-   Binomial is the distribution of the number of successes (X) in a fixed number of independent Bernoulli trials (n).
+
+-   NB is the distribution of the number of trials needed (X) to get a fixed number of successes (r).
+
+DESeq2 will use this NB formula as our model for each gene, and fit the normalized count data to it to obtain the dispersion. The coefficents are the estimates for the log2 foldchanges for each sample group. **However, these estimates do not account for the** **large dispersion we observe with low read counts**. To avoid this, the log2 fold changes calculated by the model need to be adjusted:
+
+-   DESeq2 allows for the `shrinkage` of the LFC estimates toward zero when the information for a gene is low (low counts and/or high dispersion values). Since the shrinkage of LFC is not performed by default, we need to use the function `lfcShrink()`
+
+### 2.3. Statistical testing and p-value estimation
+
+The Ho for each gene is that: `there is no differential expression across the two sample groups (LFC == 0)`. The **wald test** is used to obtain the p-values.
+
+-   To indicate which groups to compare (if we have more than 2) we can use the function `contrast()`.
+
+    -   If you do not use it, DESeq2 will use the base factor level of the condition of interest as the base for statistical testing. The base level is chosen based on alphabetical order (unless you change the reference level).
+
+    -   In the results() function you can specify the comparison of interest, and the levels to compare. The level given last is the base level for the comparison. The syntax is given below:
+
+        ```{r}
+        # contrast <- c("condition", "level_to_compare", "base_level")
+        # results(dds, contrast = contrast, alpha = alpha_threshold)
+        ```
+
+### 2.4. Workflow
+
+#### Set-up:
+
+Before starting with the data analysis DESeq2 function expects a colData in which you describe the samples. Hence, **the col names of the count matrix need to match the row names of the colData**. The varaibles in colData need to be factors.
+
+```{r}
+#Create the colData data frame.
+colData <- data.frame(row.names = colnames(count_matrix), condition = as.factor(c(rep("knock_out",3),rep("wild_type",3))), replicates = as.factor(c("1",'2','3','1','2','3')))
+
+colData_cap <- data.frame(row.names = colnames(count_matrix_cap), condition = as.factor(c(rep("knock_out",3),rep("wild_type",3))), replicates = as.factor(c("1",'2','3','1','2','3')))
+
+#SANITY CHECK: colData row names and count matrix col names need to be in the same order:
+# all(colnames(count_matrix) == row.names(colData))
+# all(colnames(count_matrix_cap) == row.names(colData_cap))
+```
+
+We are going to use `DESeqDataSetFromMatrix()` to make the `DESeqDataSet` object. This function uses count_matrix and the colData as the input and with design, we specify between which factors do we want to compare the results. If `design = ~ condition` , you'll get the results of between conditions.
+
+```{r}
+#Create the dds object
+dds <- DESeqDataSetFromMatrix(countData = count_matrix, colData = colData, design = ~ condition)
+
+dds_cap <- DESeqDataSetFromMatrix(countData = count_matrix_cap, colData = colData_cap, design = ~ condition)
+```
+
+#### Preprocessing (optional):
+
+The genes with low counts (\<10) across all the samples will be taken out of the data set to reduce technical noise and measurement error, and computational load, to improve the the statistical power of the tests used in DESeq2, and focus on genes that are more likely to be biologically relevant.
+
+**dds** -\> list variable that contains lots of information. To access thew count data set we need `counts(dds)`.
+
+```{r}
+# Obtain a logical vector with the gens we want to keep
+keep_genes <- rowSums(counts(dds)) >= 10
+dds <- dds[keep_genes,]  #See that we have filtered out 900 genes aprox
+
+keep_genes_cap <- rowSums(counts(dds_cap)) >= 10
+dds_cap <- dds_cap[keep_genes_cap,]
+```
+
+Set the reference factor level. If you don't specify it manually, R will choose alphabetically the reference one. Now that knock_out is the reference level. The log2 fold change is calculated as
+
+$\text{LFC} = \log_2\left(\frac{\text{mean expression in reference group (knock.out)}}{\text{mean expression in treatment group (wt)}}\right)$
+
+Hence, a +FC implies that gen is upregulated in the WT group, whereas a -FC is upregulated in in the know-out group.
+
+```{r}
+dds$condition <- relevel(dds$condition, ref = "wild_type")
+dds_cap$condition <- relevel(dds_cap$condition, ref = "wild_type")
+```
+
+#### Running:
+
+The `DESeq()` function is the one performing the normalization, dispersion obtention, statistical modelling... It contains the pipeline of all the steps explained above.
+
+```{r}
+dds <- DESeq(dds)
+dds_cap <- DESeq(dds_cap)
+```
+
+NOTE: If you have technical replicates (replicates taken from the same biological sample) you need to use the function collapse. But if you don't, like in this experiment, you don't need to do this step before the running.
+
+From the function `results()`, we get the following variables:
+
+-   `baseMean`: mean of normalized counts for all samples
+
+-   `log2FoldChange`: log2 fold change
+
+-   `lfcSE`: standard error
+
+-   `stat`: Wald statistic
+
+-   `pvalue`: Wald test p-value, **they do not have a default alpha level set for significance**.
+
+-   `padj`: To reduce the problem of the False Positive Rate from the multiple testing, in DESeq2, the p-values attained by the Wald test are corrected for multiple testing using the Benjamini and Hochberg method (FDR) by default.
+
+    -   By setting the FDR cutoff to \< 0.05, we’re saying that the proportion of false positives we expect amongst our differentially expressed genes is 5%. For example, if you call 500 genes as deferentially expressed with an FDR cutoff of 0.05, you expect 25 of them to be false positives.
+
+    -   There are options to use other methods in the `results()` function. The **p-adjusted values should be used to determine significant genes**.
+
+    -   The default alpha level for the padj is 0.1, which value can be changed by the `alpha` parameter in the `results()` function.
+
+```{r}
+#Set thresholds for an alpha for the padj and LFC
+DSEQ_alpha <- 0.05
+DSEQ_alpha_cap <- 0.05
+#Save the results
+res_dds <- results(dds, alpha = DSEQ_alpha) #The default is 0.1
+res_dds_cap <- results(dds_cap, alpha = DSEQ_alpha_cap)
+
+#Store the results in dataframes
+df_res_dds <- as.data.frame(res_dds)
+df_res_dds$"Significant" <- ifelse(df_res_dds$padj<=DSEQ_alpha, "Sig", "NoSig") 
+df_res_dds_cap <- as.data.frame(res_dds_cap)
+df_res_dds_cap$"Significant" <- ifelse(df_res_dds_cap$padj<=DSEQ_alpha, "Sig", "NoSig") 
+```
+
+Store the shrunken LFC in another variable to see the results in the MA plot (`lfcShrink()`):
+
+-   `coef` -\> string indicating which coefficient to shrink. This corresponds to the specific comparison you are interested in (e.g., treatment vs. control). It can be checked by running `resultsNames(dds)` in the terminal.
+
+-   `res` -\> The results object obtained from the results() function, which contains the unshrunken log2 fold changes, p-values, and other statistics.
+
+```{r}
+res_dds_shr <- lfcShrink(dds, coef = "condition_knock_out_vs_wild_type", res=res_dds)
+df_res_dds_shr <- as.data.frame(res_dds_shr)
+res_dds_shr_cap <-lfcShrink(dds_cap, coef = "condition_knock_out_vs_wild_type", res=res_dds_cap)
+df_res_dds_shr_cap <- as.data.frame(res_dds_shr_cap)
+```
+
+#### Summarizing results:
+
+To summarize the results table, a handy function in DESeq2 is `summary()`. Confusingly it has the same name as the function used to inspect data frames.
+
+```{r}
+#See that the shrinked summary is the same
+summary(res_dds)
+summary(res_dds_cap)
+summary(res_dds_shr)
+summary(res_dds_shr_cap)
+```
+
+By default, DESeq2 filters genes with low mean normalized counts (mean count threshold can be seen under `"low counts" in the summary`). **Genes with low counts (78 for RNAseq count matrix) have NAs in the padj column of the results table**.
+
+#### Exploring the results:
+
+This code here is to adjust the alpha value for the pvalues. We have to use a number that makes the number of FP to be low.
+
+```{r}
+# For RNAseq data set
+sprintf("For the RNAseq data set, with an alpha for the FDR of %.2f, we have %d significant genes, of which %.2f genes are False Positives.", 
+        DSEQ_alpha, 
+        sum(df_res_dds$padj <= DSEQ_alpha, na.rm = TRUE), 
+        DSEQ_alpha * sum(df_res_dds$padj <= DSEQ_alpha, na.rm = TRUE))
+
+# For RNAseq-cap data set
+sprintf("For the RNAseq-cap data set, with an alpha for the FDR of %.2f, we have %d significant genes, of which %.2f genes are False Positives.", 
+        DSEQ_alpha_cap, 
+        sum(df_res_dds_cap$padj <= DSEQ_alpha_cap, na.rm = TRUE), 
+        DSEQ_alpha_cap * sum(df_res_dds_cap$padj <= DSEQ_alpha_cap, na.rm = TRUE))
+```
+
+When we explore the results data frame, we see that there are **some NA values in the padj column**, but where do they come from?
+
+-   If within a row, all samples have zero counts, the baseMean column will be zero, and the log2 fold change estimates, p-value and adjusted p-value will all be set to NA.
+
+-   If a row contains a sample with an extreme count outlier then the p-value and adjusted p-value will be set to NA. These outlier counts are detected by Cook’s distance.
+
+-   If a row is filtered by automatic independent filtering, for having a low mean normalized count, then only the adjusted p-value will be set to NA.
+
+**P-value Histograms**: To check the the FDR.
+
+```{r}
+pval_hist1 <- ggplot(df_res_dds, aes(x = pvalue)) +
+  geom_histogram(na.rm = TRUE, bins = 30, fill = "blue", color = "black", alpha = 0.7) +
+  #scale_x_log10() + # Log scale for better visibility of p-values
+  labs(title = "Distribution of p-value for RNAseq", x = "padj", y = "Frequency")
+
+pval_hist2 <- ggplot(df_res_dds, aes(x = padj)) +
+  geom_histogram(na.rm = TRUE, bins = 30, fill = "blue", color = "black", alpha = 0.7) +
+  #scale_x_log10() + # Log scale for better visibility of p-values
+  labs(title = "Distribution of padj for RNAseq", x = "padj", y = "Frequency")
+
+pval_hist3 <- ggplot(df_res_dds_cap, aes(x = pvalue)) +
+  geom_histogram(na.rm = TRUE, bins = 30, fill = "blue", color = "black", alpha = 0.7) +
+  #scale_x_log10() + # Log scale for better visibility of p-values
+  labs(title = "Distribution of p-value for RNAseq-cap", x = "padj", y = "Frequency")
+
+pval_hist4 <- ggplot(df_res_dds_cap, aes(x = padj)) +
+  geom_histogram(na.rm = TRUE, bins = 30, fill = "blue", color = "black", alpha = 0.7) +
+  #scale_x_log10() + # Log scale for better visibility of p-values
+  labs(title = "Distribution of padj for RNAseq-cap", x = "padj", y = "Frequency")
+  
+grid.arrange(pval_hist1, pval_hist2, ncol = 2)
+grid.arrange(pval_hist3, pval_hist4, ncol=2)
+
+```
+
+This histograms make since we have very few genes which are differentially expressed, specially in the cap data set.
+
+Store the up-regulated and down-regulated genes:
+
+```{r}
+#Create a function for the obtention of sorted up and down regulated genes
+th_FC_up <- 1
+th_FC_down <- -1.1
+
+updown_genes <- function(data) {
+  # Select and sort upregulated genes
+  upregulated <- data[data$log2FoldChange >= th_FC_up & data$padj <= DSEQ_alpha & !is.na(data$padj), ] %>%
+    mutate(Regulation = "up") %>% arrange(padj, desc(log2FoldChange))  # Make sure to use the correct column name
+  
+  # Select and sort downregulated genes
+  downregulated <- data[data$log2FoldChange <= th_FC_down & data$padj <= DSEQ_alpha & !is.na(data$padj), ] %>%
+    mutate(Regulation = "down") %>% arrange(padj, log2FoldChange)  # Make sure to use the correct column name
+
+  # Combine both sorted dataframes
+  return_data <- bind_rows(upregulated, downregulated)
+
+  return(return_data)
+}
+
+updown_genes_RNAseq <- updown_genes(df_res_dds)
+updown_genes_RNAseq_cap <- updown_genes(df_res_dds_cap)
+updown_genes_RNAseq_shr <- updown_genes(df_res_dds_shr)
+updown_genes_RNAseq_shr_cap <- updown_genes(df_res_dds_shr_cap)
+```
+
+Compare the unshrunken and shrunken dataframes
+
+```{r}
+#Create the dataframes with the up and down genes
+df_upgenes_RNAseq <- updown_genes_RNAseq[updown_genes_RNAseq$Regulation == "up",]
+df_downgenes_RNAseq <- updown_genes_RNAseq[updown_genes_RNAseq$Regulation == "down",]
+df_upgenes_RNAseq_shr <- updown_genes_RNAseq_shr[updown_genes_RNAseq_shr$Regulation == "up",]
+df_downgenes_RNAseq_shr <- updown_genes_RNAseq_shr[updown_genes_RNAseq_shr$Regulation == "down",]
+
+sprintf("un_RNAseq has %d up-regulated and %d down-regulated genes, whereas shr_RNAseq has %d up-regulated and %d down-regulated genes. ", sum(updown_genes_RNAseq$Regulation=="up"), sum(updown_genes_RNAseq$Regulation=="down"), sum(updown_genes_RNAseq_shr$Regulation=="up"), sum(updown_genes_RNAseq_shr$Regulation=="down"))
+cat("\n")
+
+sprintf("Those upregulated genes from un_RNAseq that have been removed in the shrunkage process are: %s", paste(setdiff(rownames(df_upgenes_RNAseq), rownames(df_upgenes_RNAseq_shr)), collapse = ", "))
+cat("\n")
+
+sprintf("Those downregulated genes from un_RNAseq that have been removed in the shrunkage process are: %s", paste(setdiff(rownames(df_downgenes_RNAseq), rownames(df_downgenes_RNAseq_shr)), collapse = ", "))
+cat("\n")
+
+sprintf("Let's take gene MB2658c (upregulated) and MB3000c (downregulated), both discarded, and check their FC and padj. For MB2658c, the padj is (%f-shr, %f-unsh) and the FC is (%f-shr, %f-unsh), whereas for MB3000c the padj is (%f-shr, %f-unsh) and the FC is (%f-shr, %f-unsh)", 
+        df_res_dds_shr["MB2658c", "padj"], 
+        df_res_dds["MB2658c", "padj"],
+        df_res_dds_shr["MB2658c", "log2FoldChange"], 
+        df_res_dds["MB2658c", "log2FoldChange"], 
+        df_res_dds_shr["MB3000c", "padj"],
+        df_res_dds["MB3000c", "padj"],
+        df_res_dds_shr["MB3000c", "log2FoldChange"], 
+        df_res_dds["MB3000c", "log2FoldChange"])
+```
+
+See that none of the genes that have been removed are mpt83, mpt70 or sigK. In this sense, the shrunkage is correcting the Fold Changes, tending to reduce those displaying high variability or low counts. See that padj do not change, but the FCs are a bit reduced, what makes them to fall below the threshold.
+
+From now on, we will continue with the shrunken dataframe.
+
+```{r}
+updown_genes_RNAseq <- updown_genes_RNAseq_shr
+updown_genes_RNAseq_cap <- updown_genes_RNAseq_shr_cap
+```
+
+See that the number of genes in these databframes correspond to those in the summary function.
+
+```{r}
+#Store the up and down regulated genes in excel format
+
+updown_genes_RNAseq_w <- updown_genes_RNAseq %>% mutate(Geneids = rownames(.)) %>% select(Geneids,everything())
+write_xlsx(updown_genes_RNAseq_w, "Datasets/Results/up_down_regulated_genes/updown_genes_RNAseq.xlsx")
+updown_genes_RNAseq_cap_w <- updown_genes_RNAseq_cap %>% mutate(Geneids = rownames(.))%>% select(Geneids,everything())
+write_xlsx(updown_genes_RNAseq_cap_w, "Datasets/Results/up_down_regulated_genes/updown_genes_RNAseq_cap.xlsx")
+```
+
+Check whether the genes in RNAseq-cap are in the raw RNAseq.
+
+```{r}
+# Filter upregulated genes
+up_genes <- updown_genes_RNAseq_cap[updown_genes_RNAseq_cap$Regulation == "up" &
+    rownames(updown_genes_RNAseq_cap) %in% rownames(updown_genes_RNAseq[updown_genes_RNAseq$Regulation == "up", ]), ]
+
+# Filter downregulated genes
+down_genes <- updown_genes_RNAseq_cap[updown_genes_RNAseq_cap$Regulation == "down" &
+    rownames(updown_genes_RNAseq_cap) %in% rownames(updown_genes_RNAseq[updown_genes_RNAseq$Regulation == "down", ]), ]
+
+# Combine both upregulated and downregulated genes while excluding columns 2 to 6
+matching_genes <- rbind(up_genes[, -c(2:6)], down_genes[, -c(2:6)])
+```
+
+Make a print statement to show this:
+
+```{r}
+sprintf("RNAseq has %d up-regulated and %d down-regulated genes, whereas RNAseq-cap has %d up-regulated and %d down-regulated genes. ", sum(updown_genes_RNAseq$Regulation=="up"), sum(updown_genes_RNAseq$Regulation=="down"), sum(updown_genes_RNAseq_cap$Regulation=="up"), sum(updown_genes_RNAseq_cap$Regulation=="down"))
+cat("\n")
+
+sprintf("Of the %d up-regulated genes from RNAseq-cap, %d of them are in RNAseq. On the other hand, %d of down-regulated genes from RNAseq-cap, %d are in RNAseq.", sum(updown_genes_RNAseq_cap$Regulation=="up"), length(rownames(up_genes)), sum(updown_genes_RNAseq_cap$Regulation=="down"), length(rownames(down_genes)))
+cat("\n")
+
+sprintf("These are the upregulated overlapping: %s", paste(rownames(up_genes), collapse = ", "))
+cat("\n")
+
+sprintf("In the down-regulated genes of RNAseq-cap we find important genes such as mpt70(BQ2027_MB2900), mpt83(BQ2027_MB2898), but we do not find the sigK gene (BQ2027_MB0453c).")
+cat("\n")
+
+sprintf("Sigk gene in RNAseq has a padj of %f and a FC of %f, while in RNAseq-cap, it has a padj of %f and a FC of %f", updown_genes_RNAseq["MB0453c", "padj"], updown_genes_RNAseq["MB0453c", "log2FoldChange"], df_res_dds_cap["MB0453c", "padj"], df_res_dds_cap["MB0453c", "log2FoldChange"])
+
+```
+
+Venn diagram for the overlapping genes:
+
+```{r}
+# Define gene sets
+up_genes_RNAseq <- rownames(updown_genes_RNAseq[updown_genes_RNAseq$Regulation == "up",])
+up_genes_RNAseq_cap <- rownames(updown_genes_RNAseq_cap[updown_genes_RNAseq_cap$Regulation == "up",])
+
+down_genes_RNAseq <- rownames(updown_genes_RNAseq[updown_genes_RNAseq$Regulation == "down",])
+down_genes_RNAseq_cap <- rownames(updown_genes_RNAseq_cap[updown_genes_RNAseq_cap$Regulation == "down",])
+
+# Plot Venn Diagram for up-regulated genes
+venn.diagram(
+  x = list(
+    RNAseq = up_genes_RNAseq,
+    RNAseq_cap = up_genes_RNAseq_cap
+  ),
+  category.names = c("RNAseq", "RNAseq-cap"),
+  filename = "Venndiagrams/upregulated_venn_names.png",
+  output = TRUE,
+  fill = c("blue", "green"),
+  cat.pos = c(0, 180),
+  lwd = 2,
+  label.col = "black",
+  cex = 3,
+  cat.cex = 2.5
+)
+
+# Plot Venn Diagram for down-regulated genes
+venn.diagram(
+  x = list(
+    RNAseq = down_genes_RNAseq,
+    RNAseq_cap = down_genes_RNAseq_cap
+  ),
+  category.names = c("RNAseq", "RNAseq-cap"),
+  filename = "Venndiagrams/downregulated_venn_names.png",
+  output = TRUE,
+  fill = c("red", "yellow"),
+  cat.pos = c(0, 180),
+  lwd = 2,
+  label.col = "black",
+  cex = 3,
+  cat.cex = 2.5
+)
+
+```
+
+p-value histogram for up and down regulated genes in order to check where the differences are higher.
+
+```{r}
+pvalues_hist_merged <- function(up_dataset, down_dataset) {
+  
+  # Add a new column to identify the group (upregulated vs downregulated)
+  up_dataset$Group <- "Up-Regulated"
+  down_dataset$Group <- "Down-Regulated"
+  
+  # Merge both datasets
+  combined_dataset <- rbind(up_dataset, down_dataset)
+  
+  # Remove NA values for p-values
+  combined_dataset <- na.omit(combined_dataset)
+  
+  # Plot merged histogram for p-values
+  pval <- ggplot(combined_dataset, aes(x = -log10(padj), fill = Group)) +
+    geom_histogram(bins = 40, position = "identity", alpha = 0.6, color = "black") +
+    scale_fill_manual(values = c("Up-Regulated" = "blue", "Down-Regulated" = "red")) +
+    labs(
+      title = "Comparison of padj between up and down regulated genes in RNAseq",
+      x = expression(-log[10](padj)),
+      y = "Frequency"
+    ) +
+    theme_minimal() +
+    theme(legend.title = element_blank())
+  
+  # Plot merged histogram for Fold Change
+  fcs <- ggplot(combined_dataset, aes(x = abs(log2FoldChange), fill = Group)) +
+    geom_histogram(bins = 40, position = "identity", alpha = 0.6, color = "black") +
+    scale_fill_manual(values = c("Up-Regulated" = "blue", "Down-Regulated" = "red")) +
+    labs(
+      title = "Comparison of FCs between up and down regulated genes in RNAseq",
+      x = "Absolute Log2 FCs",
+      y = "Frequency"
+    ) +
+    theme_minimal() +
+    theme(legend.title = element_blank())
+  
+  # Combine the plots and return
+  grid.arrange(pval, fcs, ncol = 1)
+
+}
+
+# Example call with your dataframes
+pvalues_hist_merged(df_upgenes_RNAseq, df_downgenes_RNAseq)
+
+hist(count_matrix$DSK_1, main = "Histogram RNAseq counts", xlab = "counts")
+hist(count_matrix_cap$DSK_1_cap, main = "Histogram RNAseq-cap counts", xlab = "counts")
+
+```
+
+The higher the number in the x axis, the lower the padj, since we are calculating -log10. So as we can see, we have more significant padj in the downregulated genes than in the upregulated genes. And this results are in line with the FCs.
+
+#### Visualization:
+
+**Plot Counts**: examine the counts of reads for a single gene across the groups (`plotCounts`). The counts are grouped by the variables in `intgroup`, where more than one variable can be specified. Here we specify the gene which had the smallest p value. You can select the gene to plot by rowname or by numeric index.
+
+```{r}
+#Plot counts 
+#par(mfrow = c(1, 2))
+# plotCounts(dds = dds, gene = which.min(res_dds$padj), intgroup = "condition", main = "Gene with min padj (MB2900) in RNAseq") 
+# plotCounts(dds = dds_cap, gene = which.min(res_dds_cap$padj), intgroup = "condition", main = "Gene with min padj (MB0457c) in RNAseq-cap")
+
+#par(mfrow=c(1,2)) 
+plotCounts(dds = dds, gene = "MB0453c", intgroup = "condition", main = "Expression of sigk in RNAseq", cex.main = 2.5, cex.axis = 1.8, cex.lab = 2, pch = 19, xlab = "", cex = 1.5)
+
+
+plotCounts(dds = dds_cap, gene = "MB0453c", intgroup = "condition", main = "Expression of sigk in RNAseq-cap", cex.main = 2.5, cex.axis = 1.8, cex.lab = 2, pch = 19, xlab = "", cex = 1.5)
+
+
+```
+
+It can be clearly seen how the counts differ in the most differentially expressed gene.
+
+**MA plot**: A plot that can be useful to exploring our results is the MA plot. The MA plot shows the mean of the normalized counts versus (base mean) the log2 foldchanges for all genes tested. The genes that are significantly DE are colored to be easily identified.
+
+```{r}
+#par(mfrow = c(1,2))
+plotMA(res_dds, main = "Raw RNA-seq analysis")
+plotMA(res_dds_cap, main = "RNA-seq-cap analysis")
+plotMA(res_dds_shr, main = "RNA-seq analysis shrinked")
+plotMA(res_dds_shr_cap, main = "RNA-seq-cap analysis shrinked")
+```
+
+**Volcano plot:** A volcano plot is a scatter plot that displays **log2 fold change** (on the x-axis) versus **negative log10 p-value** (on the y-axis). To visualize both the magnitude of change (fold change) and the significance (p-value) of genes simultaneously.
+
+The aim is to compare the significant genes with the ones in the MA plot.
+
+```{r}
+# Filter out rows with NA in the Significant column
+df_res_dds_fil <- df_res_dds %>%
+  filter(!is.na(Significant))
+
+# Add the locus tag as a new column from the row names in both datasets
+df_res_dds_fil$gene_locus <- row.names(df_res_dds_fil)
+df_res_dds_cap$gene_locus <- row.names(df_res_dds_cap)
+
+# Function to map locus tags to gene names
+gene_map <- function(dataset){
+  df_mapping <- data.frame(gene_locus = c("MB2900", "MB2902c","MB0457c","MB2899", "MB2898", "MB0455c","MB0454c","MB0456c","MB0453c","MB2901"), 
+                           gene_name = c("mpt70","Mb2902c","Mb0457c","dipZ","mpt83","ufaA1",  "Mb0454c","Mb0456c","sigK","Mb2901"))  # Replace with actual mappings
+  df_annotated <- dataset %>% left_join(df_mapping, by = "gene_locus")
+  return(df_annotated)
+}
+
+# Apply the function to both datasets
+anot_df_res_dds <- gene_map(df_res_dds_fil)
+anot_df_res_dds_cap <- gene_map(df_res_dds_cap)
+
+# Create the volcano plot using the filtered data
+volcano_RNAseq <- ggplot(anot_df_res_dds, aes(x = log2FoldChange, y = -log10(padj), color = Significant)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  geom_hline(yintercept = -log10(DSEQ_alpha), linetype = "dashed", color = "blue", linewidth = 1) +
+  geom_vline(xintercept = -1.5, linetype = "dashed", color = 'red', linewidth = 1) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = 'red', linewidth = 1) +
+  labs(title = "Volcano Plot RNAseq", x = "Log2 Fold Change", y = "-Log10 padj") +
+  theme_minimal()+
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.position = "none"
+  )
+
+v1 <- volcano_RNAseq + 
+  geom_text_repel(data = anot_df_res_dds %>% filter(gene_name %in% c("mpt70","Mb2902c","Mb0457c","dipZ","mpt83","ufaA1",  "Mb0454c","Mb0456c","sigK","Mb2901")), 
+            aes(label = gene_name), 
+            vjust = 1.5, hjust = 0.5, size = 5, color = "black")
+
+volcano_RNAseq_cap <- ggplot(anot_df_res_dds_cap, aes(x=log2FoldChange, y = -log10(padj), color = Significant)) +  #Using padj to control false discovery rate
+  geom_point(na.rm = TRUE ,alpha=0.6, size = 1.5) +
+  geom_hline(yintercept = -log10(DSEQ_alpha_cap), linetype ="dashed", color="blue", linewidth = 1)+
+  geom_vline(xintercept = -1.5, linetype ="dashed", color='red', linewidth = 1) +
+  geom_vline(xintercept = 1, linetype ="dashed", color='red', linewidth = 1) +
+  labs(title = "Volcano Plot RNAseq-cap", x = "Log2 Fold Change", y = "-Log10 padj") +
+  theme_minimal()+
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 14)
+  )
+
+v2 <- volcano_RNAseq_cap+ 
+  geom_text_repel(data = anot_df_res_dds_cap %>% filter(gene_name %in% c("mpt70","Mb2902c","Mb0457c","dipZ","mpt83","Mb0454c","Mb0456c","sigK")), 
+            aes(label = gene_name), 
+            vjust = 0.3, hjust = -0.5, size = 5, color = "black")
+v1
+v2
+```
+
+### 2.5. Dispersion plot:
+
+The idea of the dispersoin plot is to examine to ensure your data is a good fit for the DESeq2 model.
+
+<https://hbctraining.github.io/DGE_workshop_salmon_online/lessons/04b_DGE_DESeq2_analysis.html>
+
+1.  *Estimate gene-wise dispersion (black dots)*: `Dispersion` -\> reflects how much variability there is in gene expression levels across biological replicates. A dispersion of 1 would indicate that there is no deviance from the mean (i.e mean == variance). This would suggest that gene expression is similar across all replicates.
+
+2.  *Fit-curve to gene-wise dispersion estimations (red line)*: a linear model is fitted to the dispersion estimations and yields the *expected dispersion* of the genes. Since DESeq2 assumes that genes with similar expression levels should have similar dispersion, genes are shrank as explained in the following step:
+
+3.  *Shrink gene-wise dispersion estimates toward the values predicted by the curve*:
+
+    -   If the initial estimate (black dot) is much lower than the fitted curve -\> values are shrunken (blue dots) towards the red line.
+
+    -   If black dots above the curve -\> values are shrunk toward the curve.
+
+    -   Genes with **extremely high dispersion values are not** **shrunked** (genes surrounded by blue circle). This is due to the likelihood that the gene does not follow the modeling assumptions and has higher variability than others for biological or technical reasons \<- genes we are interested in!
+
+This method serves to stabilize the variance estimates of gene expression, especially for genes that exhibit high variability. With this "transformation" we prevent potential outliers with large variations from introducing bias that can fuck up the analysis. Also, is particularly important to **reduce false positives**.
+
+The more biological replicates we have in each group, a more reliable variability (and dispersion) will be obtained, which mean that we have more information about the TRUE variability among genes. As a result, the more replicates we have the less shrinkage is needed since the model trusts the observed variability (*Recomendation* -\> recommend having at least 4 biological replicates per condition for better estimation of variation).
+
+This would be equivalent to perform a logarithm transformation on the data, but I guess this is more sophisticated.
+
+```{r}
+plotDispEsts(dds, main = "Dispersion estimation of RNAseq")
+plotDispEsts(dds_cap, main = "Dispersion estimation of RNAseq-cap")
+```
+
+**Interpretation**:
+
+-   The expectation biological data is that genes with low counts exhibit greater variations because of random fluctuations in the expression, potential noise in the sequencing machines (fall below the detection limit). In these numbers, a change of 1 represents a really high percentage of change. However, when the counts are really high, the influence of random fluctuations is minimized and the same change (of 1) will not influence the percentage of change. Hence, both plots seem correct when representing this fact since the dispersion decreases until it reaches 1000 counts, where it stabilizes.
+
+-   The fitting of the curve seems correct since the dispersion values follow the curve. A cloud of dispersion values might suggest a bad fit for the data.
+
+-   We see that there's quite shrinkage (by observing the plot, check whether there is a quantitative way), likely due to the fact that we have 3 biological replicates per group (see the recommendation above).
+
+### 2.6. Heatmaps
+
+Heatmaps customization: https://biostatsquid.com/step-by-step-heatmap-tutorial-with-pheatmap/
+
+The library `pheatmap` uses hierarchical clustering to organize the rows and the columns. The upregulated genes are significantly expressed in the WT, whereas the down regulated genes in the knock-out.
+
+```{r}
+#Heatmap of the log transformed normalized counts
+
+###Obtain the normalized counts with counts(normalized=TRUE)
+normcounts_RNAseq <- counts(dds, normalized = TRUE)
+normcounts_RNAseq_cap <- counts(dds_cap, normalized = TRUE)
+
+###Log transform the normalized counts
+transf_RNAseq <- log2(normcounts_RNAseq + 1) #Add a pseudocount to avoid log2 of 0.
+
+#Subset the up&down regulated genes with the transformed dataset
+transf_RNAseq <- transf_RNAseq[rownames(updown_genes_RNAseq),]
+
+#Change the names for the subsequent heatmap
+rownames(transf_RNAseq) <- gsub("MB0453c", "sigK", rownames(transf_RNAseq))
+rownames(transf_RNAseq) <- gsub("MB2900", "mpb70", rownames(transf_RNAseq))
+rownames(transf_RNAseq) <- gsub("MB2898", "mpb83", rownames(transf_RNAseq))
+rownames(transf_RNAseq) <- gsub("MB2659c", "hrp1", rownames(transf_RNAseq))
+rownames(transf_RNAseq) <- gsub("MB2020", "ctpF", rownames(transf_RNAseq))
+rownames(transf_RNAseq) <- gsub("MB2058", "acg", rownames(transf_RNAseq))
+rownames(transf_RNAseq) <- gsub("MB3154c", "tgs1", rownames(transf_RNAseq))
+rownames(transf_RNAseq) <- gsub("MB2057c", "hspX", rownames(transf_RNAseq))
+rownames(transf_RNAseq) <- gsub("MB2030c", "fdxA", rownames(transf_RNAseq))
+rownames(transf_RNAseq) <- gsub("MB2899", "dipZ", rownames(transf_RNAseq))
+rownames(transf_RNAseq) <- gsub("mb0455c", "ufaA1", rownames(transf_RNAseq))
+
+#Create an annotation for the up and down regulated genes
+annotation_df <- data.frame(Regulation = c(
+  rep("Up-regulated", nrow(updown_genes_RNAseq[updown_genes_RNAseq$Regulation == "up", ])),
+  rep("Down-regulated", nrow(updown_genes_RNAseq[updown_genes_RNAseq$Regulation == "down", ]))
+))
+rownames(annotation_df) <- rownames(transf_RNAseq)
+anotation_colors <- list(Regulation = c("Up-regulated" = "#A00000", "Down-regulated" = "blue"))
+
+# Generate the heatmap
+updown_heat <- pheatmap(transf_RNAseq, cluster_rows = TRUE, cluster_cols = FALSE, show_rownames = TRUE, show_colnames = TRUE, scale = "row", annotation_row = annotation_df, annotation_colors = anotation_colors,  main="Heatmap of up- and down-regulated genes",legend_breaks = c(-1, 0, 1), legend_labels = c("Low", "Medium", "High"))
+
+```
+
+Create a function to display the heatmaps of the up and down regulated genes for both datasets:
+
+```{r}
+##Heatmaps of the up and down regulated genes for RNAseq
+
+plot_heatmaps <- function(up_genes, down_genes, dataset_short_name
+                          #, annotations
+                          ){
+    # Create annotations for row clustering based on the 'cat' column
+    row_annotation_up <- annotations[rownames(up_genes), , drop = FALSE]
+    row_annotation_down <- annotations[rownames(down_genes), , drop = FALSE]
+  
+    pheatmap(up_genes,
+             cluster_rows = TRUE,
+             cluster_cols = FALSE,
+             show_rownames = TRUE,
+             show_colnames = TRUE,
+             scale = "row",
+             #annotation_row = row_annotation_up,  # Include row annotations
+             main = paste("Up-regulated genes from", dataset_short_name),
+             legend_breaks = c(-1, 0, 1),
+             legend_labels = c("Low", "Medium", "High"))
+
+    pheatmap(down_genes,
+             cluster_rows = TRUE,
+             cluster_cols = FALSE,
+             show_rownames = TRUE,
+             show_colnames = TRUE,
+             scale = "row",
+             #annotation_row = row_annotation_down,  # Include row annotations
+             main = paste("Down-regulated genes from", dataset_short_name),
+             legend_breaks = c(-1, 0, 1),
+             legend_labels = c("Low", "Medium", "High"))
+}
+
+heatmaps <- function(dataset){
+  
+    # Get the name of the dataset as a string
+    dataset_name <- deparse(substitute(dataset))  # Captures the name of the dataframe and converts it to a string
+    dataset_short_name <- gsub("updown_genes_|_cat", "", dataset_name)  # Removes "updown_genes_" from the name
+
+    # Replace specific names with desired gene names
+    rownames(dataset) <- gsub("MB0453c", "sigK", rownames(dataset))
+    rownames(dataset) <- gsub("MB2900", "mpb70", rownames(dataset))
+    rownames(dataset) <- gsub("MB2898", "mpb83", rownames(dataset))
+    rownames(dataset) <- gsub("MB2659c", "hrp1", rownames(dataset))
+    rownames(dataset) <- gsub("MB2020", "ctpF", rownames(dataset))
+    rownames(dataset) <- gsub("MB2058", "acg", rownames(dataset))
+    rownames(dataset) <- gsub("MB3154c", "tgs1", rownames(dataset))
+    rownames(dataset) <- gsub("MB2057c", "hspX", rownames(dataset))
+    rownames(dataset) <- gsub("MB2030c", "fdxA", rownames(dataset))
+    rownames(dataset) <- gsub("MB2899", "dipZ", rownames(dataset))
+    rownames(dataset) <- gsub("mb0455c", "ufaA1", rownames(dataset))
+    
+    # Create a dataframe with the upregulated and downregulated genes.
+    up_genes <- dataset[dataset$Regulation == "up",]  
+    down_genes <- dataset[dataset$Regulation == "down",]
+    
+  
+    # Select the up and down regulated genes
+    heat_up_RNAseq <- transf_RNAseq[rownames(up_genes),]     
+    heat_down_RNAseq <- transf_RNAseq[rownames(down_genes),] 
+
+    # Create a data frame of annotations based on the 'cat' column
+    # annotations <- data.frame(Categories = dataset$cat)
+    # rownames(annotations) <- rownames(dataset) 
+
+    # Run plot_heatmaps function with annotations
+    plot_heatmaps(heat_up_RNAseq, heat_down_RNAseq, dataset_short_name
+                  #, annotations
+                  )
+}
+```
+
+Heatmaps for up and downregulated genes from RNAseq
+
+```{r}
+#Add the functions in the updown_genes_RNAseq dataset
+categories <- c(
+  "virulence, detoxification, adaptation",
+  "cell wall and cell processes",
+  "conserved hypothetical protein",
+  "virulence, detoxification, adaptation",
+  "conserved hypothetical protein",
+  "cell wall and cell processes",
+  "cell wall and cell processes",
+  "virulence, detoxification, adaptation",
+  "conserved hypothetical protein",
+  "conserved hypothetical protein",
+  "conserved hypothetical protein",
+  "conserved hypothetical protein",
+  "conserved hypothetical protein",
+  "lipid metabolism",
+  "virulence, detoxification, adaptation",
+  "intermediate metabolism and respiration",
+  "conserved hypothetical protein",
+  "conserved hypothetical protein",
+  "cell wall and cell processes",
+  "cell wall and cell processes",
+  "conserved hypothetical protein",
+  "intermediate metabolism and respiration",
+  "cell wall and cell processes",
+  "lipid metabolism",
+  "cell wall and cell processes",
+  "conserved hypothetical protein",
+  "information pathways",
+  "cell wall and cell processes"
+)
+updown_genes_RNAseq_cat <- updown_genes_RNAseq
+updown_genes_RNAseq_cat$cat <- categories
+# res_heatmap_RNAseq <- heatmaps(updown_genes_RNAseq_cat)
+
+```
+
+## 3. Normal procedure
+
+### 3.1. Normalization of raw counts (rpm)
+
+The counting depth tells us that **number of total counts per sample is different**. To remove bias in the results, we have to normalize the counts. Hence, we are going to calculate the **observed rates per million total counts** to obtain readable numbers -\> rate (or percentage) of counts for a given gene. $\text{CPM} = \frac{\text{RawCounts} \cdot 10^6}{\text{Total counts in sample}}$
+
+```{r}
+#See how the total number of the samples differ:
+
+# Create a data frame for count_matrix
+count_data <- data.frame(
+  Sample = c("KO1", "KO2", "KO3", "WT1", "WT2", "WT3"),
+  Counts = colSums(count_matrix)
+)
+
+# Plot using ggplot2 with customizations
+ggplot(count_data, aes(x = Sample, y = Counts)) +
+  geom_bar(stat = "identity", fill = "skyblue", width = 0.4) +  # Adjust bar width to make them smaller
+  labs(title = "Gene counts per sample (RNA-seq)", y = "Counts") +  # Remove x label by not specifying it
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 14),  # Increase x-axis label size
+        axis.text.y = element_text(size = 14),  # Increase y-axis tick size
+        axis.title.x = element_blank(),  # Remove x-axis label
+        axis.title.y = element_text(size = 16),  # Increase y-axis title size
+        plot.title = element_text(size = 18, face = "bold"),
+        legend.position = "none")  # Remove legend
+
+# Create a data frame for count_matrix_cap
+count_data_cap <- data.frame(
+  Sample = c("KO1_cap", "KO2_cap", "KO3_cap", "WT1_cap", "WT2_cap", "WT3_cap"),
+  Counts = colSums(count_matrix_cap)
+)
+
+# Plot using ggplot2 for count_matrix_cap with customizations
+ggplot(count_data_cap, aes(x = Sample, y = Counts)) +
+  geom_bar(stat = "identity", fill = "skyblue", width = 0.4) +  # Adjust bar width to make them smaller
+  labs(title = "Gene counts per sample (RNA-seq_cap)", y = "Counts") +  # Remove x label by not specifying it
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 14),  # Increase x-axis label size
+        axis.text.y = element_text(size = 14),  # Increase y-axis tick size
+        axis.title.x = element_blank(),  # Remove x-axis label
+        axis.title.y = element_text(size = 16),  # Increase y-axis title size
+        plot.title = element_text(size = 18, face = "bold"),
+        legend.position = "none")  # Remove legend
+```
+
+It's important to filter out those genes having very low counts ACROSS ALL SAMPLES, because this will skew our results and we will loose statistical power.
+
+```{r}
+fil_count_matrix <- count_matrix[rowSums(count_matrix)>=10,]
+fil_count_matrix_cap <- count_matrix_cap[rowSums(count_matrix_cap)>=10,]
+```
+
+```{r}
+#Store the total counts per sample in a variable
+total_counts_RNAseq <- colSums(fil_count_matrix)
+total_counts_RNAseq_cap <- colSums(fil_count_matrix_cap)
+
+#Divide the total sum of a column (sample) by the individual countings per sample.
+#Sweep() is used as apply() but in data.frames
+RNAseq_rpm <- sweep(10^6*fil_count_matrix, 2, total_counts_RNAseq, FUN = "/")
+RNAseq_cap_rpm <- sweep(10^6*fil_count_matrix_cap, 2, total_counts_RNAseq_cap, FUN = "/")
+
+```
+
+```{r}
+#Plot again the histograms
+# Create a data frame for count_matrix
+count_data <- data.frame(
+  Sample = c("KO1", "KO2", "KO3", "WT1", "WT2", "WT3"),
+  Counts = colSums(RNAseq_rpm)
+)
+
+# Plot using ggplot2 with customizations
+ggplot(count_data, aes(x = Sample, y = Counts)) +
+  geom_bar(stat = "identity", fill = "tomato", width = 0.4) +  # Adjust bar width to make them smaller
+  labs(title = "RPM counts per sample (RNA-seq)", y = "Counts") +  # Remove x label by not specifying it
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 14),  # Increase x-axis label size
+        axis.text.y = element_text(size = 14),  # Increase y-axis tick size
+        axis.title.x = element_blank(),  # Remove x-axis label
+        axis.title.y = element_text(size = 16),  # Increase y-axis title size
+        plot.title = element_text(size = 18, face = "bold"),
+        legend.position = "none")  +  # Remove legend
+  ylim(0, 1250000) 
+
+
+# Create a data frame for count_matrix_cap
+count_data_cap <- data.frame(
+  Sample = c("KO1_cap", "KO2_cap", "KO3_cap", "WT1_cap", "WT2_cap", "WT3_cap"),
+  Counts = colSums(RNAseq_cap_rpm)
+)
+
+# Plot using ggplot2 for count_matrix_cap with customizations
+ggplot(count_data_cap, aes(x = Sample, y = Counts)) +
+  geom_bar(stat = "identity", fill = "tomato", width = 0.4) +  # Adjust bar width to make them smaller
+  labs(title = "RPM counts per sample (RNA-seq_cap)", y = "Counts") +  # Remove x label by not specifying it
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 14),  # Increase x-axis label size
+        axis.text.y = element_text(size = 14),  # Increase y-axis tick size
+        axis.title.x = element_blank(),  # Remove x-axis label
+        axis.title.y = element_text(size = 16),  # Increase y-axis title size
+        plot.title = element_text(size = 18, face = "bold"),
+        legend.position = "none")+  # Remove legend
+  ylim(0, 1250000) 
+```
+
+See that with the CPM transformation, all the samples have the same sequencing depth.
+
+### 3.2. Checking heteroscedasticity
+
+A general way to investigate the variance structure of a measurement is to plot sample standard deviations against sample means on a logarithmic scale (you need to add it because otherwise the outlines make it impossible to observe the shape of the plot). The knock-out and wt replicates will be plotted in different colors.
+
+```{r}
+#Calulate mean and sd of genes using apply
+wt_mean_RNAseq <- apply(RNAseq_rpm[,c(4:6)], 1, mean)
+ko_mean_RNAseq <- apply(RNAseq_rpm[,c(1:3)], 1, mean)
+wt_sd_RNAseq <- apply(RNAseq_rpm[,c(4:6)], 1, sd)
+ko_sd_RNAseq <- apply(RNAseq_rpm[,c(1:3)], 1, sd)
+
+#Same for the other dataset
+wt_mean_RNAseq_cap <- apply(RNAseq_cap_rpm[,c(4:6)], 1, mean)
+ko_mean_RNAseq_cap <- apply(RNAseq_cap_rpm[,c(1:3)], 1, mean)  
+wt_sd_RNAseq_cap <- apply(RNAseq_cap_rpm[,c(4:6)], 1, sd)
+ko_sd_RNAseq_cap <- apply(RNAseq_cap_rpm[,c(1:3)], 1, sd)       
+
+# Plotting
+plot(wt_mean_RNAseq, wt_sd_RNAseq, log = 'xy',  # Both axes are in log scale
+     pch = 20, cex = 0.5, col = 'blue', 
+     xlab = 'Mean', ylab = 'Standard deviation',
+     cex.axis = 1.2, cex.lab = 1.5)  # Increase size of ticks and labels
+points(ko_mean_RNAseq, ko_sd_RNAseq, pch = 20, cex = 0.5, col = 'red')
+title('Standard deviation vs mean (RNA-seq)', cex.main = 1.5)
+
+# Second plot 
+plot(wt_mean_RNAseq_cap, wt_sd_RNAseq_cap, log = 'xy', 
+     pch = 20, cex = 0.5, col = 'blue', 
+     xlab = 'Mean', ylab = 'Standard deviation',
+     cex.axis = 1.2, cex.lab = 1.5)  # Increase size of ticks and labels
+points(ko_mean_RNAseq_cap, ko_sd_RNAseq_cap, pch = 20, cex = 0.5, col = 'red')
+title('Standard deviation vs mean (RNAseq-cap)', cex.main = 1.5)
+```
+
+Since the data is heteroscedastic, we can not apply statistics tests that assume equal variance through all the variables (t-test, ANOVA, regression analysis, etc). Hence we need to transform our data.
+
+### 3.3. Variance transformation
+
+The reason to use a double logarithmic scale is the fact that in many experimental data sets, the standard deviation σ is proportional to a power of the mean $\mu$, symbolically, $\sigma ∝ \mu^b$, or $\sigma=A\mu^b$. Taking the logarithm of both sides gives $\log(\sigma)=\log(A)+b⋅\log(\mu)$. Hence, if we fit a line in the data points, we'll obtain the **slope (b) which is used for the variance transformation**.
+
+```{r}
+#Fit a straight line to obtain the slope 
+##RNAseq
+fit_RNAseq = lm(sd~mean, data.frame(mean=log(c(wt_mean_RNAseq,ko_mean_RNAseq)),sd=log(c(wt_sd_RNAseq,ko_sd_RNAseq))))
+coef(fit_RNAseq)
+
+##RNAseq-cap
+fit_RNAseq_cap = lm(sd~mean, data.frame(mean=log(c(wt_mean_RNAseq_cap,ko_mean_RNAseq_cap)),sd=log(c(wt_sd_RNAseq_cap,ko_sd_RNAseq_cap))))
+coef(fit_RNAseq_cap)
+
+
+```
+
+If one would draw reads from a single sample then the count data would follow a Poisson distribution, in which $\sigma ∝ \mu^{0.5}$ . **Since we got a slope of 0.9 in each data set, our data is not Poisson distributed**. This is a known effect in RNA-seq data analysis and is called `"over-dispersion"` of the data. The origin of this high variability is thought to be additional variation that the process of biological replication introduces.
+
+-   The current algorithms for RNA-seq analysis (DESeq and edgeR) use -\> `negative-binomial (NB) distribution` to model the variability (or error) of over-dispersed data.
+
+-   Another way to be able to compare samples is -\> `variance-stabilizing transform of the data` -\> obtain homoscedasticity (equal variance through all samples) -\> perform t-test, ANOVA, etc...
+
+The aim is to make the mean and the standard deviation to be independent from each other (check all the process in the exercise). To do so, we'll apply $g(x)=x^{1-b}$ to the rates per million dataset.
+
+```{r}
+# Apply the transformation
+transf_RNAseq_rpm <- RNAseq_rpm^(1- coef(fit_RNAseq)['mean'])
+transf_RNAseq_cap_rpm <- RNAseq_cap_rpm^(1- coef(fit_RNAseq_cap)['mean'])
+
+# Check the homoscedasticity 
+## Calulate mean and sd of genes
+transf_wt_mean_RNAseq <- apply(transf_RNAseq_rpm[,c(4:6)], 1, mean)
+transf_ko_mean_RNAseq <- apply(transf_RNAseq_rpm[,c(1:3)], 1, mean)
+transf_wt_sd_RNAseq <- apply(transf_RNAseq_rpm[,c(4:6)], 1,sd)
+transf_ko_sd_RNAseq <- apply(transf_RNAseq_rpm[,c(1:3)], 1, sd)
+
+## Same for the other dataset
+transf_wt_mean_RNAseq_cap <- apply(transf_RNAseq_cap_rpm[,c(4:6)], 1, mean)
+transf_ko_mean_RNAseq_cap <- apply(transf_RNAseq_cap_rpm[,c(1:3)], 1, mean)
+transf_wt_sd_RNAseq_cap <- apply(transf_RNAseq_cap_rpm[,c(4:6)], 1,sd)
+transf_ko_sd_RNAseq_cap <- apply(transf_RNAseq_cap_rpm[,c(1:3)], 1, sd)
+
+## Plotting
+plot(transf_wt_mean_RNAseq,transf_wt_sd_RNAseq,
+     pch = 20,cex=.5,col='blue',xlab = 'Mean',ylab = 'Sd', cex.axis = 1.2, cex.lab = 1.5)
+points(transf_ko_mean_RNAseq,transf_ko_sd_RNAseq,pch=20,cex=0.5,col='red')
+title('Transformed Sd vs mean (RNA-seq)', cex.main = 1.5)
+
+plot(transf_wt_mean_RNAseq_cap,transf_wt_sd_RNAseq_cap,pch = 20,cex=.5,col='blue',xlab = 'Mean',ylab = 'Sd', cex.axis = 1.2, cex.lab = 1.5)
+# and the knockdown samples in red
+points(transf_ko_mean_RNAseq_cap,transf_ko_sd_RNAseq_cap,pch=20,cex=0.5,col='red')
+title('Transformed Sd vs mean (RNA-seq-cap)', cex.main = 1.5)
+```
+
+```{r}
+#Fit a straight line to obtain the slope 
+##RNAseq
+transf_fit_RNAseq = lm(sd~mean, data.frame(mean=log(c(transf_wt_mean_RNAseq,transf_ko_mean_RNAseq)),sd=log(c(transf_wt_sd_RNAseq,transf_ko_sd_RNAseq))))
+coef(transf_fit_RNAseq)
+
+transf_fit_RNAseq_cap = lm(sd~mean, data.frame(mean=log(c(transf_wt_mean_RNAseq_cap,transf_ko_mean_RNAseq_cap)),sd=log(c(transf_wt_sd_RNAseq_cap,transf_ko_sd_RNAseq_cap))))
+coef(transf_fit_RNAseq_cap)
+```
+
+### 3.4. p-values and Fold Changes (FC)
+
+Calculate the pvalues using t-test.
+
+```{r}
+# T-test on all rows, and extracting the p-values from the test result
+pvalues_transf_RNAseq_rpm <- apply(transf_RNAseq_rpm, 1, function(row) 
+{t.test(x=row[c(4:6)], y=row[c(1:3)], var.equal=TRUE)$p.value})
+
+# T-test in the other dataset
+pvalues_transf_RNAseq_cap_rpm <- apply(transf_RNAseq_cap_rpm, 1, function(row) 
+{t.test(x=row[c(4:6)], y=row[c(1:3)], var.equal=TRUE)$p.value})
+```
+
+See that the FCs are calculated with the raw data! To calculate them, the (base 2) logarithm of the ratio of average RNA concentrations in both sample groups is used. Since the total counts differ between replicate samples, samples with a higher total count should get a higher weight in determining this average than samples with a lower total count. For Poisson-distributed count data there is a natural way to achieve this, namely by *adding all counts for a gene in a sample group, and dividing by the total number of counts in that group*. We will do this here too.
+
+A more sophisticated way to calculate a weighted average should of course take into account the true distribution of the error. This is what is done in the DESeq and edgeR packages Here we use the simple way.
+
+```{r}
+##Knock out - wild type
+log2ratio_count_matrix <- apply(
+  fil_count_matrix, 1, 
+  function(x) {log(sum(x[1:3])/sum(total_counts_RNAseq[1:3]),2) - log(sum(x[4:6])/sum(total_counts_RNAseq[4:6]),2)})
+
+log2ratio_count_matrix_cap <- apply(
+  fil_count_matrix_cap, 1, 
+  function(x) {log(sum(x[1:3])/sum(total_counts_RNAseq_cap[1:3]),2) - log(sum(x[4:6])/sum(total_counts_RNAseq_cap[4:6]),2)})
+```
+
+### 3.5. Apply FDR (adjpvalues)
+
+```{r}
+# A histogram of the p-values.
+nbins <- 100
+bins1 <- hist(pvalues_transf_RNAseq_rpm, nclass=nbins, col='grey50', main = 'p-value histogram RNAseq')
+
+bins2 <- hist(pvalues_transf_RNAseq_cap_rpm, nclass=nbins, col='grey50', main = 'p-value histogram RNAseq-cap')
+```
+
+```{r}
+null.bins1 <- bins1$breaks[-1] > 0.4
+null.level1 <- sum(bins1$counts[null.bins1])/sum(null.bins1) #estimated TP per bin
+
+plot(bins1, col='grey50', main = 'p-value histogram (RNAseq) ', xlab = "p-values", 
+     cex.axis = 1.2, cex.lab = 1.5, cex.main = 1.7)
+abline(a=null.level1,b=0,col='red',lwd=3)
+abline(v = 0.05, col='blue',lwd=3)
+
+#For the cap dataset
+null.bins2 <- bins2$breaks[-1] > 0.4
+null.level2 <- sum(bins2$counts[null.bins2]) / sum(null.bins2) 
+
+plot(bins2, col='grey50', main = 'p-value histogram (RNAseq-cap)', xlab = "p-values", 
+     cex.axis = 1.2, cex.lab = 1.5, cex.main = 1.7)
+abline(a=null.level2, b=0, col='red', lwd=3)  # Null level line
+abline(v=0.05, col='blue', lwd=3)  # Significance threshold line
+```
+
+In most cases, base-R functions don't specify an alpha value; they let you make the decision yourself. If you do have a vector of p-values, you could implement an alpha threshold.
+
+Fraction of FP:
+
+```{r}
+#How many TP do we have?
+alpha_RNAseq = 0.01
+alpha_RNAseq_cap = 0.01
+sig_genes_transf_RNAseq_rpm <- sum(pvalues_transf_RNAseq_rpm<=alpha_RNAseq)
+sig_genes_transf_RNAseq_cap_rpm <- sum(pvalues_transf_RNAseq_cap_rpm<=alpha_RNAseq_cap)
+
+#Fraction of FP RNAseq
+FP_fraction_RNAseq <- null.level1*nbins*alpha_RNAseq/sum(pvalues_transf_RNAseq_rpm <= alpha_RNAseq)
+
+#Fraction of FP RNAseq-cap
+FP_fraction_RNAseq_cap <- null.level2*nbins*alpha_RNAseq_cap/sum(pvalues_transf_RNAseq_cap_rpm <= alpha_RNAseq_cap)
+
+print(sprintf("For an alpha of %.2f we have %.2f significant genes, and %.2f FP in RNAseq (%.2f of FP)", 
+               alpha_RNAseq, sig_genes_transf_RNAseq_rpm, sig_genes_transf_RNAseq_rpm * FP_fraction_RNAseq,FP_fraction_RNAseq))
+
+print(sprintf("For an alpha of %.2f we have %.2f significant genes, and %.2f FP in RNAseq-cap (%.2f of FP)", 
+               alpha_RNAseq_cap, sig_genes_transf_RNAseq_cap_rpm, sig_genes_transf_RNAseq_cap_rpm * FP_fraction_RNAseq_cap, FP_fraction_RNAseq_cap))
+```
+
+### 3.6. Visualization
+
+```{r}
+## Create a dataframe with the pvalues and the genes + Significance variable
+df_FCpvalues_transf_RNAseq_rpm <- as.data.frame(cbind(transf_RNAseq_rpm[,-c(2:6)], pvalues = pvalues_transf_RNAseq_rpm, Significance = ifelse(pvalues_transf_RNAseq_rpm <= alpha_RNAseq, "Sig", "NoSig"), FCs = log2ratio_count_matrix, Regulation = ifelse(log2ratio_count_matrix>0, "up", "down")))
+
+# Final dataframe with pvalues and FCs
+df_FCpvalues_transf_RNAseq_rpm <- df_FCpvalues_transf_RNAseq_rpm[,-1]
+
+df_FCpvalues_transf_RNAseq_cap_rpm <- as.data.frame(cbind(transf_RNAseq_cap_rpm[,-c(2:6)], pvalues = pvalues_transf_RNAseq_cap_rpm, Significance = ifelse(pvalues_transf_RNAseq_cap_rpm <= alpha_RNAseq_cap, "Sig", "NoSig"), FCs = log2ratio_count_matrix_cap, Regulation = ifelse(log2ratio_count_matrix_cap>0, "up", "down")))
+
+# Final dataframe with pvalues and FCs
+df_FCpvalues_transf_RNAseq_cap_rpm <- df_FCpvalues_transf_RNAseq_cap_rpm[,-1]
+```
+
+\#### Volcano plot
+
+```{r}
+#Volcano plot for RNAseq
+ggplot(df_FCpvalues_transf_RNAseq_rpm, aes(x = as.numeric(FCs), y = -log10(as.numeric(pvalues)), color = Significance)) +  
+  geom_point(alpha = 0.6, size = 1.5) + 
+  geom_hline(yintercept = -log10(alpha_RNAseq), linetype ="dashed", color="blue") +
+  geom_vline(xintercept = th_FC_down, linetype ="dashed", color='red') +
+  geom_vline(xintercept = th_FC_up, linetype ="dashed", color='red') +
+  labs(title = "Volcano Plot RNAseq", x = "Log2 Fold Change", y = "-Log10 Adjusted P-value")
+
+#Volcano plot for RNAseq-cap
+
+ggplot(df_FCpvalues_transf_RNAseq_cap_rpm, aes(x = as.numeric(FCs), y = -log10(as.numeric(pvalues)), color = Significance)) +  
+  geom_point(alpha = 0.6, size = 1.5) + 
+  geom_hline(yintercept = -log10(alpha_RNAseq), linetype ="dashed", color="blue") +
+  geom_vline(xintercept = th_FC_down, linetype ="dashed", color='red') +
+  geom_vline(xintercept = th_FC_up, linetype ="dashed", color='red') +
+  labs(title = "Volcano Plot RNAseq-cap", x = "Log2 Fold Change", y = "-Log10 Adjusted P-value")
+
+```
+
+```{r}
+# Up-regulated and down-regulated genes for RNA-seq ordered for FCs and pvalues
+
+updown_genes <- function(dataset) {
+  m_dataset <- bind_rows(arrange(dataset[dataset$FCs >= th_FC_up & dataset$Significance == "Sig", ], desc(FCs), pvalues),
+                        arrange(dataset[dataset$FCs >= th_FC_down & dataset$Significance == "Sig" & dataset$Regulation == "down", ], desc(FCs), pvalues))
+  return(m_dataset)    #By changing the order inside arrange, we can give priority the ordenation parameter
+}
+
+# Up-regulated and down-regulated genes for RNA-seq-cap
+nor_updown_genes_RNAseq <- updown_genes(df_FCpvalues_transf_RNAseq_rpm)
+nor_updown_genes_RNAseq_cap <- updown_genes(df_FCpvalues_transf_RNAseq_cap_rpm)
+```
+
+Store the results in excel format:
+
+```{r}
+#Store the up and down regulated genes in excel format
+nor_updown_genes_RNAseq_w <- nor_updown_genes_RNAseq %>% mutate(Geneids = rownames(.)) %>% select(Geneids,everything())
+write_xlsx(nor_updown_genes_RNAseq_w, "Datasets/Results/up_down_regulated_genes/nor_updown_genes_RNAseq.xlsx")
+nor_updown_genes_RNAseq_cap_w <- nor_updown_genes_RNAseq_cap %>% mutate(Geneids = rownames(.))%>% select(Geneids,everything())
+write_xlsx(nor_updown_genes_RNAseq_cap_w, "Datasets/Results/up_down_regulated_genes/nor_updown_genes_RNAseq_cap.xlsx")
+```
+
+### 3.7. Validation DESeq2 - Normal procedure
+
+```{r}
+#Check whether the most up and down regulated genes in both datasets coincide.
+
+compare <- function(nor_dataset, dataset) {
+  print(sprintf("We have %d UP genes from the normal procedure, and %d from DESeq2, from those only %d genes intersect.", 
+                sum(nor_dataset$Regulation == "up"), 
+                sum(dataset$Regulation == "up"), 
+                length(intersect(rownames(nor_dataset[nor_dataset$Regulation == "up",]), 
+                                 rownames(dataset[dataset$Regulation == "up",])))))
+  
+  print(sprintf("We have %d DOWN genes from the normal procedure, and %d from DESeq2, from those only %d genes intersect.", 
+                sum(nor_dataset$Regulation == "down"), 
+                sum(dataset$Regulation == "down"), 
+                length(intersect(rownames(nor_dataset[nor_dataset$Regulation == "down",]), 
+                                 rownames(dataset[dataset$Regulation == "down",])))))
+}
+
+print("For RNAseq:")
+compare(nor_updown_genes_RNAseq, updown_genes_RNAseq)
+cat('\n')
+print("For RNAseq_cap:")
+compare(nor_updown_genes_RNAseq_cap, updown_genes_RNAseq_cap)
+
+```
+
+Store this results in a data frame to visualize it better.
+
+```{r}
+make_df <- function(gene, nor_gene) { 
+  # Find the intersecting genes
+  inter_genes <- intersect(gene, nor_gene)
+  
+  # Genes in DESeq2 that are not in normal
+  gene_in_D_notin_N <- setdiff(gene, nor_gene)
+  
+  # Genes in normal that are not in DESeq2
+  gene_in_N_notin_D <- setdiff(nor_gene, gene)
+  
+  # Create vectors for the genes with NA padding
+  v_gene <- c(inter_genes, gene_in_D_notin_N, rep(NA, length(gene_in_N_notin_D)))
+  v_nor_gene <- c(inter_genes, rep(NA, length(gene_in_D_notin_N)), gene_in_N_notin_D)
+  
+  return(list(v_gene = v_gene, v_nor_gene = v_nor_gene))
+}
+
+store <- function(dataset, nor_dataset) {
+  # Get the first 'number_genes' up gene names and sort them
+  up_genes <- rownames(dataset[dataset$Regulation == 'up', ])
+  nor_up_genes <- rownames(nor_dataset[nor_dataset$Regulation == 'up', ])
+  
+  # Get the first 'number_genes' down gene names
+  down_genes <- rownames(dataset[dataset$Regulation == 'down', ])
+  nor_down_genes <- rownames(nor_dataset[nor_dataset$Regulation == 'down', ])
+  
+  # Create data for upregulated genes
+  total_up_genes <- make_df(up_genes, nor_up_genes)
+  
+  # Create data for downregulated genes
+  total_down_genes <- make_df(down_genes, nor_down_genes)
+  
+  # Create a data frame to store the results
+  df <- data.frame(
+    Genes = c(total_up_genes$v_gene, total_down_genes$v_gene),
+    Nor_genes = c(total_up_genes$v_nor_gene, total_down_genes$v_nor_gene),
+    Regulation = c(rep("up", length(total_up_genes$v_gene)), rep("down", length(total_down_genes$v_nor_gene)))
+  )
+  
+  return(df) 
+}
+
+matching_genes_RNAseq <- store(updown_genes_RNAseq, nor_updown_genes_RNAseq)
+write_xlsx(matching_genes_RNAseq, "Datasets/Results/Matching_genes/matching_genes_RNAseq.xlsx")
+matching_genes_RNAseq_cap <- store(updown_genes_RNAseq_cap, nor_updown_genes_RNAseq_cap)
+write_xlsx(matching_genes_RNAseq_cap, "Datasets/Results/Matching_genes/matching_genes_RNAseq_cap.xlsx")
+```
+
+```{r}
+# Plot Venn Diagram for up-regulated genes
+# Function to filter out NA values
+remove_na <- function(x) {
+  return(x[!is.na(x)])
+}
+
+# Plot Venn Diagram for up-regulated genes
+venn.diagram(
+  x = list(
+    Normal_Procedure = remove_na(matching_genes_RNAseq$Genes[matching_genes_RNAseq$Regulation == "up"]), 
+    DESeq2_Procedure = remove_na(matching_genes_RNAseq$Nor_genes[matching_genes_RNAseq$Regulation == "up"])
+  ),
+  category.names = c("Manual Procedure", "DESeq2 Procedure"),
+  filename = "Venndiagrams/upregulated_venn_names.png",
+  output = TRUE,
+  fill = c("blue", "green"),
+  cat.pos = c(0, 180),
+  lwd = 2,
+  label.col = "black",
+  cex = 3,
+  cat.cex = 2.5
+)
+
+# Plot Venn Diagram for down-regulated genes
+venn.diagram(
+  x = list(
+    Normal_Procedure = remove_na(matching_genes_RNAseq$Genes[matching_genes_RNAseq$Regulation == "down"]), 
+    DESeq2_Procedure = remove_na(matching_genes_RNAseq$Nor_genes[matching_genes_RNAseq$Regulation == "down"])
+  ),
+  category.names = c("Manual Procedure", "DESeq2 Procedure"),
+  filename = "Venndiagrams/downregulated_venn_names.png",
+  output = TRUE,
+  fill = c("red", "yellow"),
+  cat.pos = c(0, 180),
+  lwd = 2,
+  label.col = "black",
+  cex = 3,
+  cat.cex = 2.5
+)
+
+# Repeat the same for RNAseq_cap data
+# Plot Venn Diagram for up-regulated genes
+venn.diagram(
+  x = list(
+    Normal_Procedure = remove_na(matching_genes_RNAseq_cap$Genes[matching_genes_RNAseq_cap$Regulation == "up"]), 
+    DESeq2_Procedure = remove_na(matching_genes_RNAseq_cap$Nor_genes[matching_genes_RNAseq_cap$Regulation == "up"])
+  ),
+  category.names = c("Manual Procedure", "DESeq2 Procedure"),
+  filename = "Venndiagrams/upregulated_venn_RNAseq_cap_names.png",
+  output = TRUE,
+  fill = c("blue", "green"),
+  cat.pos = c(0, 180),
+  lwd = 2,
+  label.col = "black",
+  cex = 3,
+  cat.cex = 2.5
+)
+
+# Plot Venn Diagram for down-regulated genes
+venn.diagram(
+  x = list(
+    Normal_Procedure = remove_na(matching_genes_RNAseq_cap$Genes[matching_genes_RNAseq_cap$Regulation == "down"]), 
+    DESeq2_Procedure = remove_na(matching_genes_RNAseq_cap$Nor_genes[matching_genes_RNAseq_cap$Regulation == "down"])
+  ),
+  category.names = c("Manual Procedure", "DESeq2 Procedure"),
+  filename = "Venndiagrams/downregulated_venn_RNAseq_cap_names.png",
+  output = TRUE,
+  fill = c("red", "yellow"),
+  cat.pos = c(0, 180),
+  lwd = 2,
+  label.col = "black",
+  cex = 3,
+  cat.cex = 2.5
+)
+```
+
+## 4. PCA
+
+*SVD (Singular Value Decomposition)*: get the linear transformation that is done by one matrix, in three different steps (three sub matrices). Can be applied to any matrix, square or rectangular (SVD on square symmetric matrices (SM) = eigen value decomposition (EVD))
+
+-   SVD on **square and symmetric matrix** ($SM = SM^{T}$) , $SM\cdot\vec{V} = \vec{V} \cdot \lambda$ , where $\vec{V}$ and $\lambda$ are matrices with the eigen vectors and eigen values, respectively. Hence, $SM = \vec{V}\cdot\lambda \cdot \vec{V}^{T}$
+
+-   SVD on non-square matrix –\> $A = U\cdot\sum \cdot V^T$, to obtain this formula we need to obtain square and symmetric matrices (Covariance Matrices (CM)) to apply EVD:
+
+    -   $A_{m\times n} \cdot A^{T}_{n\times m}=CM_{m\times m} \rightarrow$ apply EVD $\rightarrow CM_{m\times m} = U\cdot \lambda\cdot U^T \rightarrow$ U contains the eigen vectors that represent the row space of the matrix A (**left singular vectors** of A).
+
+    -   $A^{T}_{n\times m}\cdot A_{m\times n} =CM_{n\times n} \rightarrow$ apply EVD $\rightarrow CM_{n\times n} = V\cdot \lambda\cdot V^T \rightarrow$ V contains the eigen vectors that represent the column space of the matrix A (**right singular vectors** of A).
+
+    -   $\sum_{m\times n} \rightarrow$ represent the **singular values**, which are the square roots of the non-zero eigen values from $A_{m\times n} \cdot A^{T}_{n\times m}$ or $A^{T}_{n\times m}\cdot A_{m\times n}$ (they are the same in both CM). The diagonals are non-negative values sorted in descending order. The elements off-diagonal are set to 0.
+
+    -   To check the validity of the formula you just need to substitute $A^T = (U\cdot \sum\cdot V^T)^T = V \cdot \sum\cdot U^T$ and $A$ in the first to white points.
+
+When you perform SVD in R (`svd()`) the output is as follows: $U, \sum \text{and}\space V$ (see that the V is not transposed as in the SVD formula).
+
+In *PCA* *(Principal Component Analysis)*, the idea is to get the variables with most variance (difference) in our data set. Hence, to get the covariance matrix we need to autoscale the data:
+
+-   mean center $(\mu=0) \rightarrow$ subtract the mean of the variables represented in the space (move all the points around the origin)
+
+-   scale $(\sigma = 1)\rightarrow$ divide each variable by its standard deviation to make sure that each variable contributes equally to the analysis. In the scaling, the presence of outliers will be reduced, and hence, variables with less variance will be able to contribute in the analysis. Therefore, the clustering visualizations will be better (remember the exercise).
+
+After the autoscaling, SVD will be applied in the data but now the U and V matrices will contain variances in the diagonals and co-variances in the off diagonals for the row and column space, respectively. Check the variance and covariance formulas:
+
+-   $\text{Var}(S_i) = \frac{1}{n-1} \sum_{i=1}^{n} (S_i - \mu_{S_i})^2$
+
+-   $\text{Covar}(S_i, S_{i+1}) = \frac{1}{n-1} \sum_{i=1}^{n} (S_i - \mu_{S_i})\cdot (S_{i+1} - \mu_{S_{i+1}})$
+
+|          | Sample 1 | Sample 2 | Sample 3 | Sample 4 |
+|----------|:--------:|:--------:|:--------:|:--------:|
+| Sample 1 | **`45`** |   343    |    23    |    23    |
+| Sample 2 |    23    | **`34`** |    34    |    33    |
+| Sample 3 |    12    |    34    | **`23`** |    23    |
+| Sample 4 |    89    |    21    |    56    | **`12`** |
+
+: This would correspond to the V matrix in case the samples are the columns in the original matrix. See how the diagonals corresponds to the variance since the mean = 0, and the denominator is 1 because we are comparing 2 points. Same with the covariance.
+
+However, PCA uses a different terminology than SVD $\rightarrow A = T\cdot P^T + E \rightarrow$ The error (E) represents the Principal Components (PCs ) that are left in the analysis because their low contribution)
+
+-   **Principal components** are the left singular vectors (eigen vectors from U). Hence if our original matrix is $A_{m\times n}$, we'll have n PCs (*number of PCs = number of cols in A*). These are the new axis to represent the row space $(\mathbb{R}^n)$, and by $U\cdot \sum$ (from SVD), we get the "scalating amount" (the variance of each PC). I.e. each PC -\> new axis in the transformed space that maximizes the variance of the data.
+
+-   The **scores** $(T)$ are the coordinates of the rows in the PC space. $T = A\cdot P \rightarrow$ has the same dimensions that the original matrix.
+
+    -   $A_{1000\times 6},\space U_{1000\times 1000} \cdot \sum_{1000 \times 6} \rightarrow T_{1000\times 6}$
+
+    -   $A_{8\times 2},\space U_{8\times 8} \cdot \sum_{8 \times 2} \rightarrow T_{8\times 2}$
+
+![Principal Components in a data set with 8 rows and 2 cols](pics/Captura%20de%20pantalla%202024-10-17%20113022.png){width="297"}
+
+-   **Loadings** $(P)\rightarrow V$ (from SVD) are the left singular vectors (eigen vectors of V), which capture the most variance in the column space $(\mathbb{R}^m)$ of the original matrix. I.e., vector representation of a specific component in our original coordinate system, and so they are a linear combination of the original dimensions.
+
+-   In a **loadings plot**, since R by default plots the row space -\> coordinates of the column variables in the PC space. However, by plotting col space -\> lines of the PCs in the original row space (column variables as dimensions). Their coordinates would be the weights (slope/contribution) of each column variable to the PC. Hence, a cluster of points in the (+) direction of PC1 imply great variance in those directions (we can understand it as correlations as well).
+
+-   In a **scores plot** -\> the representation of the row variables in the PC space. Row variables that are located in a great (+) position in the PC1, imply that its variance is explained by the column variable that also had a large (+) location in the PC1 in the loadings plot.
+
+Hence in PCA, depending on how your dataset is organized, you can have these 2 situations.
+
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Genes (rows) - Samples (cols)                                                                                                                                                                                                                                                      | Samples (rows) - Genes (cols)                                                                                                                                                                                                   |
++:==================================================================================================================================================================================================================================================================================:+:===============================================================================================================================================================================================================================:+
+| From SVD-PCA:                                                                                                                                                                                                                                                                      | From SVD-PCA:                                                                                                                                                                                                                   |
+|                                                                                                                                                                                                                                                                                    |                                                                                                                                                                                                                                 |
+| $\begin{align}                                                                                                                                                                                                                                                                     | $\begin{align}A_{sam\times gen} \cdot A^{T}_{gen\times sam} &= U_{sam\times sam} \space (\sum_{sam\times gen}) \\&\rightarrow T_{sam\times PCs(1000)}\end{align}$                                                               |
+| A_{gen\times sam} \cdot A^{T}_{sam\times gen} &= U_{gen\times gen} \space (\sum_{gen\times sam}) \\                                                                                                                                                                                |                                                                                                                                                                                                                                 |
+| &\rightarrow T_{gen\times PCs(6)}                                                                                                                                                                                                                                                  | $A^{T}_{gene\times sam}\cdot A_{sam\times gene}=V_{gen\times gen}\rightarrow P_{gene\times \vec{PCs(1000)}}$                                                                                                                    |
+| \end{align}$                                                                                                                                                                                                                                                                       |                                                                                                                                                                                                                                 |
+|                                                                                                                                                                                                                                                                                    |                                                                                                                                                                                                                                 |
+| $A^{T}_{sam\times gene}\cdot A_{gene\times sam}=V_{sam\times sam}\rightarrow P_{sam\times \vec{PCs(6)}}$                                                                                                                                                                           |                                                                                                                                                                                                                                 |
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| This is the way we have it in the present study, but at the end I think that the information between loadings and scores is the same. The only thing that changes is that here the loadings will contain the samples and the scores will be the genes coordinates in the PC space. | This is the type of situations in the BDA project and the PCA exercise. This scenario would be useful when you want to know which gene is the most important (The one with the highest weight with PC1) in each of the samples. |
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+### 4.1. PCA with normal procedure
+
+```{r}
+# Score plot function:
+
+score_load_plot <- function(scores_df, loadings_df, name_ds, PC_variance){
+  
+  # Extract variance for PC1 and PC2
+  var_PC1 <- round(PC_variance[1, "RNAseq"], 2)
+  var_PC2 <- round(PC_variance[2, "RNAseq"], 2)
+  
+  if ("functions" %in% colnames(scores_df)){
+    p <- ggplot(scores_df, aes(x = V1, y = V2, color = as.factor(functions))) +
+      geom_point(size = 2) +  # Points for scores
+      labs(title = sprintf('Nor Scores plot %s', name_ds), 
+           x = sprintf("PC1 (%.2f%% variance)", var_PC1), 
+           y = sprintf("PC2 (%.2f%% variance)", var_PC2), 
+           color = "Gene functions") +  # Title and axis labels
+      theme(plot.title = element_text(hjust = 0.5))  # Center title
+    
+    # Add gene labels only if the number of rows is less than 50
+    if (nrow(scores_df) < 50) {
+      p <- p + geom_text_repel(aes(label = gene), size = 3, max.overlaps = Inf)  # Jittered text labels for genes
+    }
+    print(p)
+  } else {
+    
+    p <- ggplot(scores_df, aes(x = V1, y = V2)) +
+      geom_point(color = "blue", size = 2) +  # Points for scores
+      labs(title = sprintf('Nor Scores plot %s', name_ds), 
+           x = sprintf("PC1 (%.2f%% variance)", var_PC1), 
+           y = sprintf("PC2 (%.2f%% variance)", var_PC2)) +  # Title and axis labels
+      theme(plot.title = element_text(hjust = 0.5))  # Center title
+    
+    # Add gene labels only if the number of rows is less than 50
+    if (nrow(scores_df) < 50) {
+      p <- p + geom_text_repel(aes(label = gene), size = 3, max.overlaps = Inf)  # Jittered text labels for genes
+    }
+    print(p)
+  }
+  
+  # Loadings plot
+  l <- ggplot(loadings_df, aes(x = V1, y = V2, color = Groups)) +
+    geom_point(size = 3) +  # Points for loadings
+    labs(title = sprintf('Nor Loadings plot %s', name_ds), 
+         x = sprintf("PC1 (%.2f%% variance)", var_PC1), 
+         y = sprintf("PC2 (%.2f%% variance)", var_PC2)) +  # Title and axis labels
+    theme(plot.title = element_text(hjust = 0.5), 
+          legend.position = "right") +  # Center title and legend position
+    scale_color_discrete(name = "Group")  # Legend title
+  
+  print(l)
+}
+
+```
+
+```{r}
+#This function will return loadings and scores when given a transformed data set
+
+PCA <- function(trans_dataset) {
+  
+  #create a copy of the trans_dataset but without the functions
+  trans_dataset_nf <- trans_dataset[,1:6]
+  
+  #Check:transpose the matrix to see if we get the same result
+  #trans_dataset_nf <-t(trans_dataset_nf)
+  
+  # Mean-center the transformed data
+  mc_transf <- sweep(trans_dataset_nf, 1, rowMeans(trans_dataset_nf), FUN = "-")  
+  mc_transf <- sweep(mc_transf, 1, apply(trans_dataset_nf, 1, sd), FUN = "/")   
+
+  # Apply Singular Value Decomposition (SVD)
+  USV <- svd(mc_transf)
+  
+  # Obtain loadings and scores
+  scores <- USV$u %*% diag(USV$d)  # 4015*6 matrix -> represents the genes in the PC space
+  loadings <- USV$v                # 6*6 matrix -> represents the samples in the PC space
+  
+  # Calculate the total variance of the dataset
+  SSQ_total <- sum(trans_dataset_nf * trans_dataset_nf)
+  
+  # Calculate the variance explained by each principal component
+  npc_RNAseq <- ncol(scores) 
+  SSQ_PC <- numeric(npc_RNAseq)  # Preallocate for speed
+  for (i in 1:npc_RNAseq) {
+    SSQ_est <- scores[, i] %*% t(loadings[, i])
+    SSQ_PC[i] <- 100 * sum(SSQ_est * SSQ_est) / SSQ_total
+  }
+  
+  # Store the variance explained in a data frame to return
+  PC_variance <- data.frame(RNAseq = SSQ_PC, RNAseq_cum = cumsum(SSQ_PC))
+  
+  # Generate plot titles based on the dataset name
+  name_ds <- gsub("transf_|_rpm", "", deparse(substitute(trans_dataset)))
+  
+  scores_df <- as.data.frame(scores)
+  scores_df$gene <- rownames(trans_dataset_nf)
+  loadings_df <- as.data.frame(loadings) #Construct dataframes to use ggplot
+  loadings_df$"Groups" <- as.factor(c(rep("knock-out",3), rep("wild_type",3)))
+  
+  #Add the functions column in the scores df if the transf_dataset contains the column
+  if("functions" %in% colnames(trans_dataset)){
+    scores_df$functions <- trans_dataset$functions
+  }
+  
+  # Scores and loadings plot
+  score_load_plot(scores_df, loadings_df, name_ds, PC_variance)
+  
+  return(list(Var_expl = PC_variance, scores = scores, loadings = loadings))
+}
+
+```
+
+```{r}
+# Running the PCA function
+PCA_RNAseq <- PCA(transf_RNAseq_rpm)
+PCA_RNAseq_cap <- PCA(transf_RNAseq_cap_rpm)
+```
+
+Now I would like to perform a PCA on the most up and down regulated genes to see whether those which share same functions cluster together.
+
+```{r}
+nor_namesplots <- c(
+  "Scores upregulated genes RNAseq", "Loadings upregulated genes RNAseq", "Scores downregulated genes RNAseq", "Loadings downregulated genes RNAseq", 
+                
+  "Scores upregulated genes RNAseq_cap", "Loadings upregulated genes RNAseq_cap", "Scores downregulated genes RNAseq_cap", "Loadings downregulated genes RNAseq_cap")
+```
+
+```{r}
+PCR_updown_genes <- function(tranf_dataset, matching_dataset){ 
+
+  # Get the upregulated and downregulated genes and select them in the transformed dataset
+  upgenes_PCA <- na.omit(matching_dataset$Nor_genes[matching_dataset$Regulation == "up"])
+  downgenes_PCA <- na.omit(matching_dataset$Nor_genes[matching_dataset$Regulation == "down"])
+  
+  # Make the vectors containing the functions of the up and down regulated genes
+  func_upgenes <- matching_dataset$`Short Function`[matching_dataset$Nor_genes %in% upgenes_PCA]
+  func_downgenes <- matching_dataset$`Short Function`[matching_dataset$Nor_genes %in% downgenes_PCA]
+  
+  # Perform the filtering 
+  df_trans_upgenes <- tranf_dataset[upgenes_PCA, ]
+  df_trans_upgenes$functions <- func_upgenes
+  df_trans_downgenes <- tranf_dataset[downgenes_PCA, ]
+  df_trans_downgenes$functions <- func_downgenes
+    
+  # Apply the PCR function to each of the dataframes
+  up_PCR <- PCA(df_trans_upgenes)
+  down_PCR <- PCA(df_trans_downgenes)
+  up_down_PCR<- PCA(rbind(df_trans_upgenes,df_trans_downgenes))
+  
+  return(list(PCRup_genes = up_PCR, PCRdown_genes = down_PCR, PCRupdown_genes = up_down_PCR)) 
+} 
+
+PCR_updown_RNAseq <- PCR_updown_genes(transf_RNAseq_rpm, matching_genes_RNAseq_func)
+PCR_updown_RNAseq_cap <-PCR_updown_genes(transf_RNAseq_cap_rpm, matching_genes_RNAseq_cap) #update the dataset for the ones with functions
+
+```
+
+### 4.2. PCA with DESeq2
+
+The steps to perform a PCA with DESeq2 are:
+
+VARIANCE STABILIZATION: `vst()` -\> variance stabilizing transformation, stabilizes variance across the range of mean expression values, making the data more suitable for PCA by reducing heteroscedasticity.
+
+`plotPCA()` is the function used to perform the PCA, and plots the first 2 components. The `intgroup` function allows you to color and group the samples by one or more factors. The returned data will be a data frame containing information about the principal components.
+
+```{r}
+#Create function to get up down genes from count_matrix and count_matrix_cap
+get_updown_genes <- function(updown_dataset, count_dataset){
+  up_dataset <- count_dataset[na.omit(updown_dataset$Genes[updown_dataset$Regulation=="up"]),]
+  down_dataset <- count_dataset[na.omit(updown_dataset$Genes[updown_dataset$Regulation=="down"]),]
+  
+  #Add the up and down col for the up&down genes dataframe
+  updown_v <- c(rep("up", nrow(up_dataset)), rep("down", nrow(down_dataset)))
+  return(list(up_genes = up_dataset, down_genes = down_dataset, all_updown_genes = rbind(up_dataset, down_dataset), updown_v = updown_v))
+}
+
+raw_updown_RNAseq <- get_updown_genes(matching_genes_RNAseq, count_matrix)
+raw_updown_RNAseq_cap <- get_updown_genes(matching_genes_RNAseq_cap, count_matrix_cap)
+
+#Create another dds object but with the upregulated genes dasdfrom DESeq2 analysis
+dds_up_RNAseq <- DESeqDataSetFromMatrix(countData = raw_updown_RNAseq$up_genes, colData = colData, design = ~ condition)
+dds_down_RNAseq <- DESeqDataSetFromMatrix(countData = raw_updown_RNAseq$down_genes, colData = colData, design = ~ condition)
+dds_up_RNAseq_cap <- DESeqDataSetFromMatrix(countData = raw_updown_RNAseq_cap$up_genes, colData = colData_cap, design = ~ condition)
+dds_down_RNAseq_cap <- DESeqDataSetFromMatrix(countData = raw_updown_RNAseq_cap$down_genes, colData = colData_cap, design = ~ condition)
+dds_updown_RNAseq <- DESeqDataSetFromMatrix(countData = raw_updown_RNAseq$all_updown_genes, colData = colData, design = ~ condition)
+
+```
+
+Function that will perform a PCA with DESeq2 method: See that using DESeq2, the default PCA output is to plot the loadings (rows -\> samples, columns -\> PCs). However, if we want to know how the genes cluster together, we need to plot the scores (rows -\> genes, columns -\> PCs) To do so, we need to extract them manually from the variance stabilized data using the `prcomp()` function.
+
+```{r}
+#Function to get the function of the genes in the particular dataset.
+function_genes <- function(dds_f, name_dds){
+  
+  # Initialize function_vector as an empty character vector
+  gene_names <- rownames(dds_f)
+
+  #Vector which will store the functions 
+  function_vector <- na.omit(matching_genes_RNAseq_func$`Short Function`[matching_genes_RNAseq_func$Genes %in% gene_names])
+  return(function_vector) #This will be a character vector
+}
+```
+
+```{r}
+#Function to perform scoreplot
+
+score_plot <- function(scores_df, plot_name_scores) {
+  # Plot scores for PC1 and PC2
+  if ("functions" %in% colnames(scores_df)) {
+    scores_plot <- ggplot(scores_df, aes(x = PC1, y = PC2, color = as.factor(functions))) +
+                    geom_point(size = 2) +  
+                    labs(title = plot_name_scores, x = "PC1", y = "PC2", color = "Gene functions") + 
+                    geom_vline(xintercept = 0, linetype = "dashed", color = "black", alpha = 0.5) +
+                    geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.5) +
+                    theme(plot.title = element_text(hjust = 0.5))
+  } else if ("Regulation" %in% colnames(scores_df)) {
+    scores_plot <- ggplot(scores_df, aes(x = PC1, y = PC2, color = as.factor(Regulation))) +
+                    geom_point(size = 2) +  
+                    labs(title = plot_name_scores, x = "PC1", y = "PC2", color = "Regulation") + 
+                    geom_vline(xintercept = 0, linetype = "dashed", color = "black", alpha = 0.5) +
+                    geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.5) +
+                    scale_color_manual(values = c("blue", "#A00000")) +  # Adjust colors here
+                    theme_minimal()+
+                    theme(
+    plot.title = element_text(size = 16),
+    legend.text = element_text(size = 14),   
+    legend.title = element_text(size = 16),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14),
+    axis.text.x = element_text(size = 12),  
+    axis.text.y = element_text(size = 12)
+  )
+  } else {
+    scores_plot <- ggplot(scores_df, aes(x = PC1, y = PC2)) +
+                    geom_point(color = "blue", size = 2) +  
+                    labs(title = plot_name_scores, x = "PC1", y = "PC2") + 
+                    geom_vline(xintercept = 0, linetype = "dashed", color = "black", alpha = 0.5) +
+                    geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.5) +
+                    theme(plot.title = element_text(hjust = 0.5)) +
+                    theme_minimal()
+    
+  }
+
+  # Add gene labels only if the number of rows is less than 50
+  if (nrow(scores_df) < 50) {
+    scores_plot <- scores_plot + geom_text_repel(aes(label = genes), size = 4, max.overlaps = Inf)
+  }
+
+  # Print the plot
+  print(scores_plot)
+  return(scores_plot)
+}
+```
+
+```{r}
+# Function to get the scores:
+scores_DESeq <- function(vsd, plot_name_scores, name_dds, dds_f) {
+  
+  # Extract variance stabilized counts matrix
+  vsd_matrix <- assay(vsd)
+  
+  # Run PCA using prcomp (transposing the matrix so that genes are columns and samples are rows)
+  pca_res <- prcomp(t(vsd_matrix), scale. = TRUE)
+  
+  # Access the PCA scores
+  scores <- pca_res$rotation  # scores matrix
+  
+  # Convert the scores into a data frame for ggplot
+  scores_df <- as.data.frame(scores)
+  
+  #Change the name of some genes
+  rownames(scores_df) <- gsub("MB0453c", "sigK", rownames(scores_df))
+  rownames(scores_df) <- gsub("MB2900", "mpb70", rownames(scores_df))
+  rownames(scores_df) <- gsub("MB2898", "mpb83", rownames(scores_df))
+  rownames(scores_df) <- gsub("MB2659c", "hrp1", rownames(scores_df))
+  rownames(scores_df) <- gsub("MB2020", "ctpF", rownames(scores_df))
+  rownames(scores_df) <- gsub("MB2058", "acg", rownames(scores_df))
+  rownames(scores_df) <- gsub("MB3154c", "tgs1", rownames(scores_df))
+  rownames(scores_df) <- gsub("MB2057c", "hspX", rownames(scores_df))
+  rownames(scores_df) <- gsub("MB2030c", "fdxA", rownames(scores_df))
+  rownames(scores_df) <- gsub("MB2899", "dipZ", rownames(scores_df))
+  rownames(scores_df) <- gsub("mb0455c", "ufaA1", rownames(scores_df))
+  
+  scores_df$genes <- rownames(scores_df)  # Add gene names as a column
+  
+  #Get the functions of the genes and add a new column in scores_df for the up/down regulated datasets
+  including_datasets <- c("dds_up_RNAseq", "dds_down_RNAseq"
+                          #,"dds_up_RNAseq_cap", "dds_down_RNAseq_cap"
+                          )
+  if (name_dds %in% including_datasets) {
+    scores_df$functions <- function_genes(dds_f, name_dds)
+  } else if (name_dds == "dds_updown_RNAseq"){
+    scores_df$Regulation <- raw_updown_RNAseq$updown_v
+  } 
+  
+  # Execute function to display the score plot
+  scores_plot <- score_plot(scores_df, plot_name_scores) 
+  
+  return(list(scores_df = scores_df, scores_plot = scores_plot))
+}
+```
+
+```{r}
+# Function to perform PCA with DESeq2
+PCA_DESeq2 <- function(dds_f, names_loadings_scores) {
+  
+  #Get the name of dss, to pass it to a further function
+  name_dds <- deparse(substitute(dds_f))
+  
+  # Check the number of genes in the dataset
+  if (nrow(counts(dds_f)) < 50) {
+    # If the number of genes is small, use varianceStabilizingTransformation
+    vsd <- varianceStabilizingTransformation(dds_f)
+  } else {
+    # Otherwise, use vst for larger datasets
+    vsd <- vst(dds_f)
+  }
+  
+  # Perform PCA
+  PCA <- plotPCA(vsd, intgroup = "condition", returnData = TRUE)
+  
+  # Plotting
+  ## Store the loadings and score plot names
+  plot_name_scores <- names_loadings_scores[2]
+  plot_name_loadings <- names_loadings_scores[1]
+  
+  percentVar <- round(100 * attr(PCA, "percentVar"))
+  loadings_plot <- ggplot(PCA, aes(PC1, PC2, color = condition)) +
+    geom_point(size = 3) +
+    ggtitle(plot_name_loadings) +
+    xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+    ylab(paste0("PC2: ", percentVar[2], "% variance"))+
+    theme_minimal()+
+    theme(
+    plot.title = element_text(size = 16),
+    legend.text = element_text(size = 14),   
+    legend.title = element_text(size = 16),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14),
+    axis.text.x = element_text(size = 12),  
+    axis.text.y = element_text(size = 12))
+  
+  print(loadings_plot)
+  
+  # Use the function above to get the scores
+  scores <- scores_DESeq(vsd, plot_name_scores, name_dds, dds_f)
+  
+ return(list(PCA = PCA, scores = scores$scores_df, loadings_plot = loadings_plot, score_plot = scores$scores_plot))
+}
+
+```
+
+```{r}
+#Names of the plots all data and up-down genes:
+namesplots <- c("Loadings RNAseq", "Scores RNAseq", "Loadings RNAseq_cap", "Scores RNAseq_cap",
+                
+                "Loadings upregulated genes RNAseq", "Scores upregulated genes RNAseq", "Loadings downregulated genes RNAseq", "Scores downregulated genes RNAseq", 
+                
+                "Loadings upregulated genes RNAseq_cap", "Scores upregulated genes RNAseq_cap", "Loadings downregulated genes RNAseq_cap", "Scores downregulated genes RNAseq_cap", 
+                "Loadings up & down regulated genes RNAseq", "Scores up & down regulated RNAseq")
+
+```
+
+```{r}
+#PCA on raw datasets
+DEseq2_PCA_RNAseq <- PCA_DESeq2(dds, namesplots[1:2])
+DEseq2_PCA_RNAseq_cap <- PCA_DESeq2(dds_cap, namesplots[3:4])
+```
+
+```{r}
+#PCA on up and down regulated genes
+DEseq2_PCA_up_RNAseq <- PCA_DESeq2(dds_up_RNAseq, namesplots[5:6])
+DEseq2_PCA_down_RNAseq <- PCA_DESeq2(dds_down_RNAseq, namesplots[7:8])
+DEseq2_PCA_up_RNAseq_cap <- PCA_DESeq2(dds_up_RNAseq_cap, namesplots[9:10])
+DEseq2_PCA_down_RNAseq_cap <- PCA_DESeq2(dds_down_RNAseq_cap, namesplots[11:12])
+```
+
+```{r}
+
+DEseq2_PCA_updown_RNAseq <- PCA_DESeq2(dds_updown_RNAseq, namesplots[13:14])
+```
+
+From the Score plot it can be observed how the down regulated genes have much greater variance than the upregulated. These might be explained by the fact that these ones have higher FCs than the upregulated, which make sense. This can be used as a a checking with the plot of the FCs comparison.
+
+The thing with the normal procedure is that is has had selected fewer up and downregulated genes and slightly different. I guess that this makes the analysis to be different to the one obtained with DESeq2's PCR. However when we compare all up and down regulated genes, we see that the loadings are almost the same, and the the up and down regulated genes cluster in the same way as in DESeq2. Hence, we can conclude that the down regulated genes have a greater impact in this analysis, i.e. they are the most different ones between both groups
+
+##5. Categories analysis
+
+```{r}
+#Load the enrich data sent by Josemari
+cat_data <-as.data.frame(read_csv("Datasets/Enrichment analysis/mbovis_categories.csv"))
+cat_data$Mb_tag <- tolower(cat_data$Mb_tag) #Convert all letters in lower case
+
+#Add a new column in upregulated genes with the locus tags to perform the join. 
+cat_updown_genes_RNAseq <- updown_genes_RNAseq
+cat_updown_genes_RNAseq$"Mb_tag" <- rownames(updown_genes_RNAseq) 
+cat_updown_genes_RNAseq <- select(cat_updown_genes_RNAseq, "Mb_tag", everything()) #Move it to the first column.
+cat_updown_genes_RNAseq$Mb_tag <- tolower(cat_updown_genes_RNAseq$Mb_tag) #Convert all leters in lower case
+
+#Use left join 
+cat_updown_genes_RNAseq <- cat_updown_genes_RNAseq %>% left_join(cat_data, by = "Mb_tag")
+cat_updown_genes_RNAseq[29, 9] <- "protein synthesis"
+
+#Get the dataframe in excel file
+write_xlsx(cat_updown_genes_RNAseq, "Datasets/Enrichment analysis/cat_updown_genes_RNAseq.xlsx")
+```
+
+Now we will make a circular plot to visualize the proportions of the functions of the genes
+
+```{r}
+
+ggplot(cat_updown_genes_RNAseq, aes(x=as.factor(category)), fill = Regulation)+
+  geom_bar() +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +  # Ensure integer breaks
+  #coord_polar(theta = "x") + #This is to make it circle, but the categories overlap
+  xlab("Gene Function") +
+  ylab("Frequency") +
+  ggtitle("Frequency of all Gene Categories")
+
+
+# ggplot(cat_updown_genes_RNAseq[cat_updown_genes_RNAseq$Regulation=="up",], aes(x=as.factor(category)))+
+#   geom_bar(fill="steelblue") +
+#   scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +
+#   coord_flip()+
+#   xlab("Gene Function") +
+#   ylab("Frequency") +
+#   ggtitle("Frequency of Up-regulated Gene Categories")
+# 
+# ggplot(cat_updown_genes_RNAseq[cat_updown_genes_RNAseq$Regulation=="down",], aes(x=as.factor(category)))+
+#   geom_bar(fill="steelblue") +
+#   scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +
+#   coord_flip()+
+#   xlab("Gene Function") +
+#   ylab("Frequency") +
+#   ggtitle("Frequency of Down-regulated Gene Categories")
+
+```
+
+```{r}
+# Create a combined dataset with counts for each category
+combined_data <- cat_updown_genes_RNAseq %>%
+  group_by(category, Regulation) %>%
+  summarise(Count = n(), .groups = 'drop') %>%  # Count occurrences and drop grouping
+  mutate(Count = ifelse(Regulation == "down", -Count, Count))  # Invert counts for downregulated genes
+
+combined_data <- combined_data[-10,]
+
+# Create the combined bar plot
+ggplot(combined_data, aes(x = as.factor(category), y = Count, fill = Regulation)) +
+  geom_bar(stat = "identity", position = "identity") +  # Use identity to keep the counts
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10), 
+                     limits = c(min(combined_data$Count) - 1, max(combined_data$Count) + 1),  labels = label_number(accuracy = 1)) +
+  coord_flip() +
+  xlab("") +
+  ylab("Gene counts") +
+  ggtitle("Gene counts of Up- and Down-regulated Gene Categories") +
+  geom_vline(xintercept = 0, color = "black", linetype = "dashed")+
+  scale_fill_manual(values = c("up" = "#A00000", "down" = "blue"))+  # Different colors for up/down
+  theme_minimal()+
+  theme(
+    axis.text.x = element_text(size = 14),  # Increase x-axis text size
+    axis.text.y = element_text(size = 16),  # Increase y-axis text size
+    axis.title.x = element_text(size = 16),  # Increase x-axis title size
+    #axis.title.y = element_text(size = 16),  # Increase y-axis title size
+    plot.title = element_text(size = 16),      # Increase plot title size
+    legend.text = element_text(size = 14),             # Increase legend text size
+    legend.title = element_text(size = 16)
+  )
+ 
+  
+```
